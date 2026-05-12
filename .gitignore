@@ -50,7 +50,7 @@ docker-compose.override.yml
 *.pt
 *.onnx
 *.engine
-models/
+# models/
 
 # mypy / ruff
 .mypy_cache/
