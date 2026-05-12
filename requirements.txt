@@ -1,0 +1,29 @@
+# FastAPI
+fastapi>=0.115.0
+uvicorn>=0.30.0
+
+# Database
+sqlalchemy>=2.0.0
+
+# Pydantic
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+
+# Computer Vision
+opencv-python-headless>=4.9
+numpy>=1.24,<3.0
+
+# YOLO (NCNN)
+ncnn>=1.0
+
+# Depth Estimation
+onnxruntime>=1.17
+
+# MQTT
+paho-mqtt>=2.0.0
+
+# Camera (RPi CSI - optional, only on RPi)
+# picamera2>=0.3
+
+# Utils
+python-multipart>=0.0.9
