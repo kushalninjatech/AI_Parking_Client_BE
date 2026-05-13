@@ -43,7 +43,6 @@ def on_state_change(camera_id: int, all_results, changes):
     from app.db.session import SessionLocal
     from app.models.parking_slot import ParkingSlot
     from app.models.camera import Camera
-    from app.services.central_sync import central_sync
 
     db = SessionLocal()
     try:
@@ -56,22 +55,11 @@ def on_state_change(camera_id: int, all_results, changes):
             if slot:
                 slot.state = r["state"]
         db.commit()
-
-        # Push states to central (attach central_slot_id to each result)
-        if cam and cam.central_camera_id:
-            slot_ids = [r["id"] for r in all_results]
-            db_slots = db.query(ParkingSlot).filter(ParkingSlot.id.in_(slot_ids)).all()
-            central_id_map = {s.id: s.central_slot_id for s in db_slots}
-            enriched = [
-                {**r, "central_slot_id": central_id_map.get(r["id"])}
-                for r in all_results
-            ]
-            central_sync.push_slot_states(cam.central_camera_id, enriched)
     finally:
         db.close()
 
-    # Publish only changed slots to the events topic. Full-state snapshots are
-    # handled separately by snapshot_loop on a timer (MQTT_SNAPSHOT_INTERVAL).
+    # Publish only changed slots to MQTT events topic.
+    # Full-state snapshots handled by snapshot_loop on timer (MQTT_SNAPSHOT_INTERVAL).
     if changes:
         mqtt_publisher.publish_slot_events(camera_label, changes)
 

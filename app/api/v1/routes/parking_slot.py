@@ -37,22 +37,7 @@ def create_slot(body: ParkingSlotCreate, db: Session = Depends(get_db)):
     db.refresh(slot)
 
     _update_detection_loop(slot.camera_id, db)
-
-    # Push slot to central
-    from app.models.camera import Camera
-    from app.services.central_sync import central_sync
-    cam = db.query(Camera).filter(Camera.id == slot.camera_id).first()
-    if cam and cam.central_camera_id:
-        central_slot_id = central_sync.register_slot(cam.central_camera_id, {
-            "label": slot.label,
-            "polygon_coords": slot.polygon_coords,
-            "pos_x1": slot.pos_x1, "pos_y1": slot.pos_y1,
-            "pos_x2": slot.pos_x2, "pos_y2": slot.pos_y2,
-        })
-        if central_slot_id:
-            slot.central_slot_id = central_slot_id
-            db.commit()
-            db.refresh(slot)
+    _sync_slots_to_central(slot.camera_id, db)
 
     return slot
 
@@ -97,19 +82,7 @@ def update_slot(slot_id: int, body: ParkingSlotUpdate, db: Session = Depends(get
     db.refresh(slot)
 
     _update_detection_loop(slot.camera_id, db)
-
-    # Push updated polygon to central
-    from app.models.camera import Camera
-    from app.services.central_sync import central_sync
-    if "polygon_coords" in data and slot.central_slot_id:
-        cam = db.query(Camera).filter(Camera.id == slot.camera_id).first()
-        if cam and cam.central_camera_id:
-            central_sync.push_slot_config(cam.central_camera_id, [{
-                "central_slot_id": slot.central_slot_id,
-                "polygon_coords": slot.polygon_coords,
-                "pos_x1": slot.pos_x1, "pos_y1": slot.pos_y1,
-                "pos_x2": slot.pos_x2, "pos_y2": slot.pos_y2,
-            }])
+    _sync_slots_to_central(slot.camera_id, db)
 
     return slot
 
@@ -123,6 +96,7 @@ def delete_slot(slot_id: int, db: Session = Depends(get_db)):
     db.delete(slot)
     db.commit()
     _update_detection_loop(camera_id, db)
+    _sync_slots_to_central(camera_id, db)
     return {"message": "Slot deleted"}
 
 
@@ -164,6 +138,27 @@ def calibrate_slot(slot_id: int, db: Session = Depends(get_db)):
 
     parking_detector.set_calibration(slot.id, cal_data)
     return {"message": f"Slot {slot.label} calibrated successfully"}
+
+
+def _sync_slots_to_central(camera_id: int, db: Session) -> None:
+    """Publish all slots for a camera to Central via MQTT (upsert)."""
+    from app.main import mqtt_publisher
+    from app.models.camera import Camera
+
+    cam = db.query(Camera).filter(Camera.id == camera_id).first()
+    if not cam:
+        return
+
+    slots = db.query(ParkingSlot).filter(ParkingSlot.camera_id == camera_id).all()
+    mqtt_publisher.publish_sync_slots("upsert", cam.label, [
+        {
+            "label": s.label,
+            "polygon_coords": s.polygon_coords,
+            "pos_x1": s.pos_x1, "pos_y1": s.pos_y1,
+            "pos_x2": s.pos_x2, "pos_y2": s.pos_y2,
+        }
+        for s in slots
+    ])
 
 
 def _update_detection_loop(camera_id: int, db: Session) -> None:

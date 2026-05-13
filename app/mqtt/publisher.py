@@ -44,7 +44,7 @@ class MQTTPublisher:
             self._client.username_pw_set(settings.MQTT_USERNAME, settings.MQTT_PASSWORD)
 
             # LWT — broker publishes this automatically if our connection drops
-            lwt_topic = f"parking/{settings.LOT_ID}/{settings.DEVICE_ID}/status"
+            lwt_topic = f"parking/{settings.DEVICE_ID}/status"
             self._client.will_set(lwt_topic, json.dumps({
                 "device_id": settings.DEVICE_ID,
                 "status": "offline",
@@ -76,7 +76,7 @@ class MQTTPublisher:
         if self._client:
             # Publish clean online→offline status before disconnecting
             try:
-                lwt_topic = f"parking/{settings.LOT_ID}/{settings.DEVICE_ID}/status"
+                lwt_topic = f"parking/{settings.DEVICE_ID}/status"
                 self._client.publish(lwt_topic, json.dumps({
                     "device_id": settings.DEVICE_ID,
                     "status": "offline",
@@ -95,7 +95,7 @@ class MQTTPublisher:
         """
         if not changes:
             return
-        topic = f"parking/{settings.LOT_ID}/{settings.DEVICE_ID}/events"
+        topic = f"parking/{settings.DEVICE_ID}/events"
         payload = {
             "device_id": settings.DEVICE_ID,
             "camera_id": camera_label,
@@ -117,7 +117,7 @@ class MQTTPublisher:
         Retained: any reconnecting consumer immediately gets the latest known state.
         Also serves as a liveness signal — no snapshot for >2 intervals = device down.
         """
-        topic = f"parking/{settings.LOT_ID}/{settings.DEVICE_ID}/slots"
+        topic = f"parking/{settings.DEVICE_ID}/slots"
         payload = {
             "device_id": settings.DEVICE_ID,
             "camera_id": camera_label,
@@ -140,7 +140,7 @@ class MQTTPublisher:
 
     def publish_status(self) -> None:
         """Publish online status on /status topic (retained). Also used by LWT for offline."""
-        topic = f"parking/{settings.LOT_ID}/{settings.DEVICE_ID}/status"
+        topic = f"parking/{settings.DEVICE_ID}/status"
         payload = {
             "device_id": settings.DEVICE_ID,
             "status": "online",
@@ -153,7 +153,7 @@ class MQTTPublisher:
 
     def publish_heartbeat(self, telemetry: Dict) -> None:
         """Publish system telemetry on /heartbeat topic (not retained)."""
-        topic = f"parking/{settings.LOT_ID}/{settings.DEVICE_ID}/heartbeat"
+        topic = f"parking/{settings.DEVICE_ID}/heartbeat"
         payload = {
             "device_id": settings.DEVICE_ID,
             **telemetry,
@@ -161,8 +161,39 @@ class MQTTPublisher:
         }
         self._publish(topic, payload)
 
+    # ------------------------------------------------------------------
+    # Config sync (camera + slot CRUD → Central)
+    # ------------------------------------------------------------------
+
+    def publish_sync_camera(self, action: str, camera_data: Dict) -> None:
+        """Sync camera create/update/delete to Central."""
+        topic = f"parking/{settings.DEVICE_ID}/sync/camera"
+        payload = {
+            "device_id": settings.DEVICE_ID,
+            "action": action,
+            "camera": camera_data,
+            "timestamp": time.time(),
+        }
+        self._publish(topic, payload)
+
+    def publish_sync_slots(self, action: str, camera_label: str, slots_data: List[Dict]) -> None:
+        """Sync slots + polygon_coords to Central."""
+        topic = f"parking/{settings.DEVICE_ID}/sync/slots"
+        payload = {
+            "device_id": settings.DEVICE_ID,
+            "action": action,
+            "camera_label": camera_label,
+            "slots": slots_data,
+            "timestamp": time.time(),
+        }
+        self._publish(topic, payload)
+
+    # ------------------------------------------------------------------
+    # Command ACK
+    # ------------------------------------------------------------------
+
     def publish_ack(self, command_id: str, action: str, status: str) -> None:
-        topic = f"parking/{settings.LOT_ID}/{settings.DEVICE_ID}/ack"
+        topic = f"parking/{settings.DEVICE_ID}/ack"
         payload = {
             "device_id": settings.DEVICE_ID,
             "command_id": command_id,
@@ -242,7 +273,7 @@ class MQTTPublisher:
             logger.info("MQTT connected")
 
             # Publish online status (retained so central sees it immediately)
-            status_topic = f"parking/{settings.LOT_ID}/{settings.DEVICE_ID}/status"
+            status_topic = f"parking/{settings.DEVICE_ID}/status"
             client.publish(status_topic, json.dumps({
                 "device_id": settings.DEVICE_ID,
                 "status": "online",

@@ -26,19 +26,16 @@ def create_camera_endpoint(body: CameraCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(cam)
 
-    # Register on central platform
-    from app.services.central_sync import central_sync
-    from app.core.config import settings
-    central_cam_id = central_sync.register_camera({
+    # Sync to Central via MQTT
+    from app.main import mqtt_publisher
+    mqtt_publisher.publish_sync_camera("create", {
+        "local_id": cam.id,
         "label": cam.label,
         "source": cam.source,
         "camera_type": cam.camera_type,
+        "frame_width": cam.frame_width,
+        "frame_height": cam.frame_height,
     })
-    if central_cam_id:
-        cam.central_camera_id = central_cam_id
-        cam.central_device_id = settings.DEVICE_ID
-        db.commit()
-        db.refresh(cam)
 
     return cam
 
@@ -65,6 +62,17 @@ def update_camera(camera_id: int, body: CameraUpdate, db: Session = Depends(get_
         setattr(cam, k, v)
     db.commit()
     db.refresh(cam)
+
+    from app.main import mqtt_publisher
+    mqtt_publisher.publish_sync_camera("update", {
+        "local_id": cam.id,
+        "label": cam.label,
+        "source": cam.source,
+        "camera_type": cam.camera_type,
+        "frame_width": cam.frame_width,
+        "frame_height": cam.frame_height,
+    })
+
     return cam
 
 
@@ -75,8 +83,11 @@ def delete_camera(camera_id: int, db: Session = Depends(get_db)):
         raise HTTPException(404, "Camera not found")
     cam.is_active = False
     db.commit()
-    from app.main import detection_loop
+
+    from app.main import detection_loop, mqtt_publisher
     detection_loop.remove_camera(camera_id)
+    mqtt_publisher.publish_sync_camera("delete", {"local_id": cam.id, "label": cam.label})
+
     return {"message": "Camera deleted"}
 
 
