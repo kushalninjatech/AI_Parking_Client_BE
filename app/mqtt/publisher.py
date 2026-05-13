@@ -138,18 +138,28 @@ class MQTTPublisher:
         else:
             logger.debug("Snapshot skipped (offline) — next tick will reconcile")
 
-    def publish_heartbeat(self) -> None:
+    def publish_status(self) -> None:
+        """Publish online status on /status topic (retained). Also used by LWT for offline."""
         topic = f"parking/{settings.LOT_ID}/{settings.DEVICE_ID}/status"
         payload = {
             "device_id": settings.DEVICE_ID,
             "status": "online",
             "timestamp": time.time(),
         }
-        # Retain=True so central always sees the last known status
         if self._client and self._connected:
             self._client.publish(topic, json.dumps(payload), qos=1, retain=True)
         else:
             self._store_outbox(topic, payload)
+
+    def publish_heartbeat(self, telemetry: Dict) -> None:
+        """Publish system telemetry on /heartbeat topic (not retained)."""
+        topic = f"parking/{settings.LOT_ID}/{settings.DEVICE_ID}/heartbeat"
+        payload = {
+            "device_id": settings.DEVICE_ID,
+            **telemetry,
+            "timestamp": time.time(),
+        }
+        self._publish(topic, payload)
 
     def publish_ack(self, command_id: str, action: str, status: str) -> None:
         topic = f"parking/{settings.LOT_ID}/{settings.DEVICE_ID}/ack"

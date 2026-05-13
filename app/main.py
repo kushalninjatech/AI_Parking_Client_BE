@@ -81,11 +81,22 @@ def on_frame_captured(camera_id: int, frame):
     latest_frames[camera_id] = frame
 
 
-async def heartbeat_loop():
-    """Publish heartbeat every 30 seconds."""
-    await asyncio.sleep(30)  # let MQTT finish connecting before first publish
+async def status_loop():
+    """Publish online status every 30 seconds on /status (retained)."""
+    await asyncio.sleep(10)  # let MQTT finish connecting before first publish
     while True:
-        mqtt_publisher.publish_heartbeat()
+        mqtt_publisher.publish_status()
+        await asyncio.sleep(30)
+
+
+async def heartbeat_loop():
+    """Publish system telemetry every 30 seconds on /heartbeat."""
+    from app.utils.telemetry import collect_telemetry
+
+    await asyncio.sleep(15)  # stagger from status_loop
+    while True:
+        telemetry = collect_telemetry()
+        mqtt_publisher.publish_heartbeat(telemetry)
         await asyncio.sleep(30)
 
 
@@ -175,8 +186,9 @@ async def lifespan(app: FastAPI):
         on_frame_captured=on_frame_captured,
     )
 
-    # Start detection loop + heartbeat + snapshot as background tasks
+    # Start background tasks
     loop_task = asyncio.create_task(detection_loop.run())
+    status_task = asyncio.create_task(status_loop())
     heartbeat_task = asyncio.create_task(heartbeat_loop())
     snapshot_task = asyncio.create_task(snapshot_loop())
 
@@ -187,6 +199,7 @@ async def lifespan(app: FastAPI):
     # Shutdown
     detection_loop.stop()
     loop_task.cancel()
+    status_task.cancel()
     heartbeat_task.cancel()
     snapshot_task.cancel()
     mqtt_publisher.disconnect()

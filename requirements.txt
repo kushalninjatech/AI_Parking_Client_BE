@@ -25,5 +25,8 @@ paho-mqtt>=2.0.0
 # Camera (RPi CSI - optional, only on RPi)
 # picamera2>=0.3
 
+# System telemetry
+psutil>=5.9.0
+
 # Utils
 python-multipart>=0.0.9
