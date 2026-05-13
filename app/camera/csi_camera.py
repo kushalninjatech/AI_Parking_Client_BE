@@ -19,12 +19,14 @@ class CSICamera(BaseCamera):
         try:
             from picamera2 import Picamera2
             self._picam = Picamera2(self._index)
-            config = self._picam.create_still_configuration(
-                main={"size": (1920, 1080), "format": "RGB888"}
+            # create_video_configuration is correct for continuous capture_array() calls.
+            # BGR888 gives a native BGR array — no colour conversion needed.
+            config = self._picam.create_video_configuration(
+                main={"size": (1920, 1080), "format": "BGR888"}
             )
             self._picam.configure(config)
             self._picam.start()
-            logger.info("CSI camera %d opened", self._index)
+            logger.info("CSI camera %d opened (BGR888 video config)", self._index)
             return True
         except Exception:
             logger.exception("Failed to open CSI camera %d", self._index)
@@ -35,10 +37,8 @@ class CSICamera(BaseCamera):
             return False, None
         try:
             frame = self._picam.capture_array()
-            # picamera2 returns RGB, convert to BGR for OpenCV
-            import cv2
-            frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-            return True, frame_bgr
+            # capture_array() returns BGR888 — ready for OpenCV, no conversion needed
+            return True, frame
         except Exception:
             logger.exception("Error capturing from CSI camera %d", self._index)
             return False, None

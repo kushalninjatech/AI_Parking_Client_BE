@@ -27,6 +27,7 @@ class ParkingSlotResponse(BaseModel):
     pos_y1: Optional[int]
     pos_x2: Optional[int]
     pos_y2: Optional[int]
+    central_slot_id: Optional[str] = None
 
     class Config:
         from_attributes = True

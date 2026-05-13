@@ -1,8 +1,4 @@
-"""Main detection engine. Processes full frame through YOLO + depth,
-classifies each slot as VEHICLE / EMPTY / OBSTRUCTED.
-
-Ported from R&D/poc — combines app_v2.py detection with parking_detector.py grid logic.
-"""
+"""Main detection engine — YOLO + edge/depth anomaly for parking slot classification."""
 
 import json
 import logging
@@ -17,174 +13,196 @@ from app.detection.depth_estimator import DepthEstimator
 
 logger = logging.getLogger(__name__)
 
-# Depth anomaly detection constants (from POC)
-GRID_ROWS = 6
-GRID_COLS = 6
-CELL_THRESHOLD = 0.35
-MIN_TRIGGERED_RATIO = 0.05
-HOT_CELL_THRESHOLD = 0.8
+REF_SIZE = (64, 64)
+
+# Laplacian edge-variance ratio: current / calibration.
+# Lighting change (smooth gradient) — ratio ≈ 0.8-1.4  (no new edges appear).
+# Real object (box, chair)         — ratio ≈ 2.0-8.0  (object edges >> empty floor).
+LAP_RATIO_THRESHOLD = 1.8
+
+# Grayscale p90 — secondary confirmation.
+GRAY_P90_THRESHOLD = 0.13
+
+# Depth mean-shift — tertiary confirmation when calibration available.
+DEPTH_SHIFT_THRESHOLD = 0.03
+
+# Consecutive OBSTRUCTED frames required before reporting.
+CONFIRM_FRAMES = 2
 
 
 class ParkingDetector:
-    """Detects slot states using YOLO + depth estimation on full frame."""
+    """Detects slot states using YOLO + edge/depth anomaly."""
 
     def __init__(self, yolo: YOLODetector, depth: DepthEstimator) -> None:
         self._yolo = yolo
         self._depth = depth
-        # Per-slot calibration: {slot_id: {"norm": ndarray, "ref_grads": list}}
         self._calibrations: Dict[int, Dict] = {}
+        self._obstruct_streak: Dict[int, int] = {}
 
     def set_calibration(self, slot_id: int, calibration_data: bytes) -> None:
-        """Load calibration data for a slot (from DB)."""
         import pickle
         self._calibrations[slot_id] = pickle.loads(calibration_data)
 
     def calibrate_slot(self, frame: np.ndarray, slot_id: int, polygon: List[List[int]]) -> bytes:
-        """Calibrate a slot with an empty reference frame. Returns serialized data."""
+        """Capture empty-slot reference. Returns serialised bytes."""
         import pickle
 
-        depth_map = self._depth.estimate(frame)
-        if depth_map is None:
+        h, w = frame.shape[:2]
+        x1, y1, x2, y2 = self._polygon_bbox(polygon)
+        x1, y1 = max(0, x1), max(0, y1)
+        x2, y2 = min(w, x2), min(h, y2)
+        if x2 <= x1 or y2 <= y1:
+            logger.error("Slot %d polygon bbox out of frame bounds — cannot calibrate", slot_id)
             return b""
 
-        # Extract ROI from depth map using polygon bounding box
-        x1, y1, x2, y2 = self._polygon_bbox(polygon)
-        roi_depth = depth_map[y1:y2, x1:x2].astype(np.float32)
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY).astype(np.float32)
+        roi_g = gray[y1:y2, x1:x2]
+        ref_g = cv2.resize(roi_g, REF_SIZE)
 
-        # Z-score normalize
-        mean, std = roi_depth.mean(), roi_depth.std() + 1e-8
-        norm = (roi_depth - mean) / std
+        # Grayscale brightness-normalised pattern
+        gray_mean = float(ref_g.mean())
+        ref_g_norm = ref_g / (gray_mean + 1e-8)
 
-        # Grid cell gradient energies
-        h, w = norm.shape
-        ref_grads = []
-        for r in range(GRID_ROWS):
-            for c in range(GRID_COLS):
-                cy1 = r * h // GRID_ROWS
-                cy2 = (r + 1) * h // GRID_ROWS
-                cx1 = c * w // GRID_COLS
-                cx2 = (c + 1) * w // GRID_COLS
-                cell = norm[cy1:cy2, cx1:cx2]
-                gx = cv2.Sobel(cell, cv2.CV_32F, 1, 0, ksize=3)
-                gy = cv2.Sobel(cell, cv2.CV_32F, 0, 1, ksize=3)
-                grad = float(np.mean(np.sqrt(gx ** 2 + gy ** 2)))
-                ref_grads.append(grad)
+        # Laplacian edge-variance of empty slot (lighting-invariant structural reference)
+        lap = cv2.Laplacian(ref_g, cv2.CV_32F)
+        ref_lap_var = float(lap.var())
 
-        data = {"norm_mean": float(mean), "norm_std": float(std), "ref_grads": ref_grads}
+        data: Dict = {
+            "ref_gray": ref_g_norm.tolist(),
+            "ref_gray_mean": gray_mean,
+            "ref_lap_var": ref_lap_var,
+        }
+
+        depth_map = self._depth.estimate(frame)
+        if depth_map is not None:
+            roi_d = depth_map[y1:y2, x1:x2].astype(np.float32)
+            ref_d = cv2.resize(roi_d, REF_SIZE)
+            data["ref_depth"] = ref_d.tolist()
+            data["ref_depth_mean"] = float(ref_d.mean())
+
+        logger.info(
+            "Slot %d calibrated — gray_mean=%.1f lap_var=%.1f depth_mean=%s",
+            slot_id, gray_mean, ref_lap_var,
+            f"{data['ref_depth_mean']:.1f}" if "ref_depth_mean" in data else "N/A",
+        )
         return pickle.dumps(data)
 
-    def detect_frame(
-        self, frame: np.ndarray, slots: List[Dict]
-    ) -> List[Dict]:
-        """Detect all slot states from a single frame.
-
-        Args:
-            frame: Full camera frame (BGR)
-            slots: List of {id, label, polygon_coords (JSON string)}
-
-        Returns:
-            List of {id, label, state, confidence}
-        """
-        # Step 1: YOLO on full frame
+    def detect_frame(self, frame: np.ndarray, slots: List[Dict]) -> List[Dict]:
+        """Detect all slot states from a single frame."""
         vehicle_detections = self._yolo.detect(frame)
-        logger.debug("YOLO: %d vehicles detected", len(vehicle_detections))
+        logger.debug("YOLO: %d detections", len(vehicle_detections))
 
-        # Step 2: Depth on full frame
         depth_map = self._depth.estimate(frame)
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY).astype(np.float32)
 
         results = []
         for slot in slots:
-            polygon = json.loads(slot["polygon_coords"]) if isinstance(slot["polygon_coords"], str) else slot["polygon_coords"]
+            polygon = (
+                json.loads(slot["polygon_coords"])
+                if isinstance(slot["polygon_coords"], str)
+                else slot["polygon_coords"]
+            )
             if not polygon:
-                results.append({"id": slot["id"], "label": slot["label"], "state": SlotState.EMPTY, "confidence": 0.0})
+                results.append({"id": slot["id"], "label": slot["label"],
+                                 "state": SlotState.EMPTY, "confidence": 0.0})
                 continue
 
-            # Step 3: Check if any vehicle centroid is inside this slot's polygon
             polygon_np = np.array(polygon, dtype=np.int32)
-            has_vehicle = False
-            vehicle_conf = 0.0
-
+            has_vehicle, vehicle_conf = False, 0.0
             for det in vehicle_detections:
                 cx, cy = det["centroid"]
-                inside = cv2.pointPolygonTest(polygon_np, (float(cx), float(cy)), False)
-                if inside >= 0:
-                    has_vehicle = True
-                    vehicle_conf = det["confidence"]
+                if cv2.pointPolygonTest(polygon_np, (float(cx), float(cy)), False) >= 0:
+                    has_vehicle, vehicle_conf = True, det["confidence"]
                     break
 
             if has_vehicle:
-                results.append({"id": slot["id"], "label": slot["label"], "state": SlotState.VEHICLE, "confidence": vehicle_conf})
+                self._obstruct_streak[slot["id"]] = 0
+                results.append({"id": slot["id"], "label": slot["label"],
+                                 "state": SlotState.VEHICLE, "confidence": vehicle_conf})
                 continue
 
-            # Step 4: No vehicle — check depth for obstruction
-            if depth_map is not None and slot["id"] in self._calibrations:
-                is_obstructed, confidence = self._check_depth_anomaly(
-                    depth_map, polygon, slot["id"]
-                )
-                state = SlotState.OBSTRUCTED if is_obstructed else SlotState.EMPTY
-                results.append({"id": slot["id"], "label": slot["label"], "state": state, "confidence": confidence})
+            if slot["id"] in self._calibrations:
+                is_obstructed, confidence = self._check_anomaly(gray, depth_map, polygon, slot["id"])
+                sid = slot["id"]
+                if is_obstructed:
+                    self._obstruct_streak[sid] = self._obstruct_streak.get(sid, 0) + 1
+                else:
+                    self._obstruct_streak[sid] = 0
+                confirmed = self._obstruct_streak.get(sid, 0) >= CONFIRM_FRAMES
+                state = SlotState.OBSTRUCTED if confirmed else SlotState.EMPTY
+                results.append({"id": slot["id"], "label": slot["label"],
+                                 "state": state, "confidence": confidence if confirmed else 0.0})
             else:
-                # No depth or no calibration — assume empty
-                results.append({"id": slot["id"], "label": slot["label"], "state": SlotState.EMPTY, "confidence": 0.0})
+                results.append({"id": slot["id"], "label": slot["label"],
+                                 "state": SlotState.EMPTY, "confidence": 0.0})
 
         return results
 
-    def _check_depth_anomaly(
-        self, depth_map: np.ndarray, polygon: List[List[int]], slot_id: int
+    def _check_anomaly(
+        self,
+        gray: np.ndarray,
+        depth_map: Optional[np.ndarray],
+        polygon: List[List[int]],
+        slot_id: int,
     ) -> Tuple[bool, float]:
-        """Compare depth ROI against calibrated reference. Returns (is_obstructed, confidence)."""
         cal = self._calibrations.get(slot_id)
-        if not cal:
+        if not cal or "ref_gray" not in cal:
+            logger.warning("Slot %d needs recalibration — treating as EMPTY", slot_id)
             return False, 0.0
 
+        h, w = gray.shape[:2]
         x1, y1, x2, y2 = self._polygon_bbox(polygon)
-        roi_depth = depth_map[y1:y2, x1:x2].astype(np.float32)
+        x1, y1 = max(0, x1), max(0, y1)
+        x2, y2 = min(w, x2), min(h, y2)
+        if x2 <= x1 or y2 <= y1:
+            return False, 0.0
 
-        # Z-score normalize
-        mean, std = roi_depth.mean(), roi_depth.std() + 1e-8
-        norm = (roi_depth - mean) / std
+        roi_g = gray[y1:y2, x1:x2]
+        cur_g = cv2.resize(roi_g, REF_SIZE)
 
-        # Grid scoring
-        h, w = norm.shape
-        ref_grads = cal["ref_grads"]
-        triggered = 0
-        max_score = 0.0
+        # --- Laplacian edge-variance ratio (lighting-invariant) ---
+        cur_lap = cv2.Laplacian(cur_g, cv2.CV_32F)
+        cur_lap_var = float(cur_lap.var())
+        ref_lap_var = cal.get("ref_lap_var", 1.0)
+        lap_ratio = cur_lap_var / (ref_lap_var + 1.0)
+        lap_triggered = lap_ratio > LAP_RATIO_THRESHOLD
 
-        for r in range(GRID_ROWS):
-            for c in range(GRID_COLS):
-                cy1 = r * h // GRID_ROWS
-                cy2 = (r + 1) * h // GRID_ROWS
-                cx1 = c * w // GRID_COLS
-                cx2 = (c + 1) * w // GRID_COLS
-                cell = norm[cy1:cy2, cx1:cx2]
+        # --- Grayscale p90 diff ---
+        cur_g_norm = cur_g / (cur_g.mean() + 1e-8)
+        ref_g_norm = np.array(cal["ref_gray"], dtype=np.float32)
+        if ref_g_norm.shape != cur_g_norm.shape:
+            ref_g_norm = cv2.resize(ref_g_norm, REF_SIZE)
+        gray_p90 = float(np.percentile(np.abs(cur_g_norm - ref_g_norm), 90))
+        gray_triggered = gray_p90 > GRAY_P90_THRESHOLD
 
-                # Mean depth diff
-                ref_norm_mean = 0.0  # calibrated reference is normalized to ~0
-                mean_diff = abs(float(cell.mean()) - ref_norm_mean)
+        # --- Depth shift ---
+        depth_shift = 0.0
+        if depth_map is not None and "ref_depth_mean" in cal:
+            roi_d = depth_map[y1:y2, x1:x2].astype(np.float32)
+            cur_d = cv2.resize(roi_d, REF_SIZE)
+            depth_shift = (cur_d.mean() - cal["ref_depth_mean"]) / 255.0
+        depth_triggered = depth_shift > DEPTH_SHIFT_THRESHOLD
 
-                # Gradient excess
-                gx = cv2.Sobel(cell, cv2.CV_32F, 1, 0, ksize=3)
-                gy = cv2.Sobel(cell, cv2.CV_32F, 0, 1, ksize=3)
-                grad = float(np.mean(np.sqrt(gx ** 2 + gy ** 2)))
-                idx = r * GRID_COLS + c
-                ref_grad = ref_grads[idx] if idx < len(ref_grads) else 0.01
-                grad_excess = max(0.0, grad / (ref_grad + 1e-4) - 1.0)
+        # 2-of-3 majority vote: lap + gray + depth.
+        # Degrades gracefully if depth is unavailable (lap+gray still wins).
+        triggered_count = sum([lap_triggered, gray_triggered, depth_triggered])
+        is_obstructed = triggered_count >= 2
 
-                score = mean_diff + 0.3 * grad_excess
-                max_score = max(max_score, score)
-                if score > CELL_THRESHOLD:
-                    triggered += 1
+        lap_conf = min(lap_ratio / LAP_RATIO_THRESHOLD / 2.5, 1.0)
+        if depth_map is not None and "ref_depth_mean" in cal and depth_shift > 0:
+            depth_conf = min(depth_shift / DEPTH_SHIFT_THRESHOLD / 2.5, 1.0)
+            confidence = min((lap_conf + depth_conf) / 2, 1.0)
+        else:
+            confidence = lap_conf
 
-        total_cells = GRID_ROWS * GRID_COLS
-        ratio = triggered / total_cells
-        is_obstructed = ratio >= MIN_TRIGGERED_RATIO or max_score > HOT_CELL_THRESHOLD
-        confidence = min((ratio / 0.25) * 0.5 + (max_score / 2.0) * 0.5, 1.0)
-
+        logger.info(
+            "Slot %d lap_ratio=%.2f gray_p90=%.3f depth_shift=%.3f obstructed=%s",
+            slot_id, lap_ratio, gray_p90, depth_shift, is_obstructed,
+        )
         return is_obstructed, confidence
 
     @staticmethod
     def _polygon_bbox(polygon: List[List[int]]) -> Tuple[int, int, int, int]:
-        """Get bounding box from polygon points."""
         pts = np.array(polygon)
         x1, y1 = pts.min(axis=0)
         x2, y2 = pts.max(axis=0)

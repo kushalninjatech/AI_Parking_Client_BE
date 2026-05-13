@@ -25,6 +25,21 @@ def create_camera_endpoint(body: CameraCreate, db: Session = Depends(get_db)):
     db.add(cam)
     db.commit()
     db.refresh(cam)
+
+    # Register on central platform
+    from app.services.central_sync import central_sync
+    from app.core.config import settings
+    central_cam_id = central_sync.register_camera({
+        "label": cam.label,
+        "source": cam.source,
+        "camera_type": cam.camera_type,
+    })
+    if central_cam_id:
+        cam.central_camera_id = central_cam_id
+        cam.central_device_id = settings.DEVICE_ID
+        db.commit()
+        db.refresh(cam)
+
     return cam
 
 
@@ -60,6 +75,8 @@ def delete_camera(camera_id: int, db: Session = Depends(get_db)):
         raise HTTPException(404, "Camera not found")
     cam.is_active = False
     db.commit()
+    from app.main import detection_loop
+    detection_loop.remove_camera(camera_id)
     return {"message": "Camera deleted"}
 
 
@@ -70,7 +87,7 @@ def capture_snapshot(camera_id: int, db: Session = Depends(get_db)):
     if not cam:
         raise HTTPException(404, "Camera not found")
 
-    camera = create_camera(cam.source)
+    camera = create_camera(cam.source, cam.camera_type)
     if not camera.open():
         raise HTTPException(500, "Failed to open camera")
 
@@ -125,7 +142,7 @@ def get_live_frame(camera_id: int, db: Session = Depends(get_db)):
     if not cam:
         raise HTTPException(404, "Camera not found")
 
-    camera = create_camera(cam.source)
+    camera = create_camera(cam.source, cam.camera_type)
     if not camera.open():
         raise HTTPException(500, "Failed to open camera")
 

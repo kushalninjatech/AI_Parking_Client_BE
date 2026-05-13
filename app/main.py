@@ -11,12 +11,18 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.db.base import Base
-from app.db.session import engine
+from app.db.session import engine, SessionLocal
 from app.detection.yolo_detector import YOLODetector
 from app.detection.depth_estimator import DepthEstimator
 from app.detection.detector import ParkingDetector
 from app.detection.detection_loop import DetectionLoop
 from app.mqtt.publisher import MQTTPublisher
+
+# Import all models so SQLAlchemy registers them before create_all
+from app.models import camera as _camera_model  # noqa: F401
+from app.models import parking_slot as _slot_model  # noqa: F401
+from app.models import calibration as _cal_model  # noqa: F401
+from app.models import mqtt_outbox as _outbox_model  # noqa: F401
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s")
 logger = logging.getLogger("ai_parking_client")
@@ -26,7 +32,7 @@ yolo_detector = YOLODetector()
 depth_estimator = DepthEstimator()
 parking_detector = ParkingDetector(yolo_detector, depth_estimator)
 detection_loop = DetectionLoop(parking_detector)
-mqtt_publisher = MQTTPublisher()
+mqtt_publisher = MQTTPublisher(db_factory=SessionLocal)
 
 # Latest frames per camera (for snapshot/streaming)
 latest_frames = {}
@@ -36,11 +42,11 @@ def on_state_change(camera_id: int, all_results, changes):
     """Called when detection loop produces results."""
     from app.db.session import SessionLocal
     from app.models.parking_slot import ParkingSlot
+    from app.models.camera import Camera
+    from app.services.central_sync import central_sync
 
-    # Get camera label
     db = SessionLocal()
     try:
-        from app.models.camera import Camera
         cam = db.query(Camera).filter(Camera.id == camera_id).first()
         camera_label = cam.label if cam else f"cam-{camera_id}"
 
@@ -50,11 +56,24 @@ def on_state_change(camera_id: int, all_results, changes):
             if slot:
                 slot.state = r["state"]
         db.commit()
+
+        # Push states to central (attach central_slot_id to each result)
+        if cam and cam.central_camera_id:
+            slot_ids = [r["id"] for r in all_results]
+            db_slots = db.query(ParkingSlot).filter(ParkingSlot.id.in_(slot_ids)).all()
+            central_id_map = {s.id: s.central_slot_id for s in db_slots}
+            enriched = [
+                {**r, "central_slot_id": central_id_map.get(r["id"])}
+                for r in all_results
+            ]
+            central_sync.push_slot_states(cam.central_camera_id, enriched)
     finally:
         db.close()
 
-    # Publish to MQTT (all results, not just changes)
-    mqtt_publisher.publish_slot_states(camera_label, all_results)
+    # Publish only changed slots to the events topic. Full-state snapshots are
+    # handled separately by snapshot_loop on a timer (MQTT_SNAPSHOT_INTERVAL).
+    if changes:
+        mqtt_publisher.publish_slot_events(camera_label, changes)
 
 
 def on_frame_captured(camera_id: int, frame):
@@ -64,9 +83,43 @@ def on_frame_captured(camera_id: int, frame):
 
 async def heartbeat_loop():
     """Publish heartbeat every 30 seconds."""
+    await asyncio.sleep(30)  # let MQTT finish connecting before first publish
     while True:
         mqtt_publisher.publish_heartbeat()
         await asyncio.sleep(30)
+
+
+async def snapshot_loop():
+    """Publish full slot-state snapshot per camera every MQTT_SNAPSHOT_INTERVAL seconds.
+
+    Reconciliation: events publish on change, but if any event is lost, the snapshot
+    brings central back in sync. Retained on the broker so reconnecting consumers
+    immediately see current state.
+    """
+    await asyncio.sleep(settings.MQTT_SNAPSHOT_INTERVAL)  # delay first run
+    while True:
+        try:
+            from app.db.session import SessionLocal
+            from app.models.camera import Camera
+            from app.models.parking_slot import ParkingSlot
+
+            db = SessionLocal()
+            try:
+                cameras = db.query(Camera).filter(Camera.is_active == True).all()
+                for cam in cameras:
+                    slots = db.query(ParkingSlot).filter(ParkingSlot.camera_id == cam.id).all()
+                    if not slots:
+                        continue
+                    mqtt_publisher.publish_slot_snapshot(
+                        cam.label,
+                        [{"label": s.label, "state": s.state} for s in slots],
+                    )
+                logger.debug("Snapshot published for %d cameras", len(cameras))
+            finally:
+                db.close()
+        except Exception:
+            logger.exception("Snapshot loop iteration failed")
+        await asyncio.sleep(settings.MQTT_SNAPSHOT_INTERVAL)
 
 
 @asynccontextmanager
@@ -105,7 +158,7 @@ async def lifespan(app: FastAPI):
                 for s in cam.slots if s.polygon_coords
             ]
             if slots:
-                detection_loop.add_camera(cam.id, cam.source, slots)
+                detection_loop.add_camera(cam.id, cam.source, slots, cam.camera_type)
 
                 # Load calibrations
                 from app.models.calibration import Calibration
@@ -122,9 +175,10 @@ async def lifespan(app: FastAPI):
         on_frame_captured=on_frame_captured,
     )
 
-    # Start detection loop + heartbeat as background tasks
+    # Start detection loop + heartbeat + snapshot as background tasks
     loop_task = asyncio.create_task(detection_loop.run())
     heartbeat_task = asyncio.create_task(heartbeat_loop())
+    snapshot_task = asyncio.create_task(snapshot_loop())
 
     logger.info("AI Parking Client ready")
 
@@ -134,6 +188,7 @@ async def lifespan(app: FastAPI):
     detection_loop.stop()
     loop_task.cancel()
     heartbeat_task.cancel()
+    snapshot_task.cancel()
     mqtt_publisher.disconnect()
     logger.info("AI Parking Client shutdown")
 

@@ -124,7 +124,7 @@ class YOLODetector:
 
         results = []
         for i in indices:
-            idx = i if isinstance(i, int) else i[0]
+            idx = int(np.ravel(i)[0])  # handles int, list[int], and numpy scalar
             b = boxes[idx]
             cx = (b[0] + b[2]) / 2
             cy = (b[1] + b[3]) / 2

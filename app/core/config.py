@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     MQTT_BROKER_PORT: int = 41883
     MQTT_USERNAME: str = "admin"
     MQTT_PASSWORD: str = "Broker@123"
+    # How often to publish a full slot-state snapshot (retained) for reconciliation.
+    # Change events publish immediately to a separate topic; this is the heartbeat.
+    MQTT_SNAPSHOT_INTERVAL: int = 300  # seconds (5 minutes)
 
     # Central API
     CENTRAL_API_URL: str = "http://localhost:8100/api/v1"

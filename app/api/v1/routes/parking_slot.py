@@ -14,7 +14,6 @@ router = APIRouter(prefix="/slots", tags=["Parking Slots"])
 
 @router.post("", response_model=ParkingSlotResponse, status_code=201)
 def create_slot(body: ParkingSlotCreate, db: Session = Depends(get_db)):
-    # Auto-calculate bounding box from polygon
     pos_x1, pos_y1, pos_x2, pos_y2 = None, None, None, None
     if body.polygon_coords:
         try:
@@ -37,8 +36,23 @@ def create_slot(body: ParkingSlotCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(slot)
 
-    # Update detection loop
     _update_detection_loop(slot.camera_id, db)
+
+    # Push slot to central
+    from app.models.camera import Camera
+    from app.services.central_sync import central_sync
+    cam = db.query(Camera).filter(Camera.id == slot.camera_id).first()
+    if cam and cam.central_camera_id:
+        central_slot_id = central_sync.register_slot(cam.central_camera_id, {
+            "label": slot.label,
+            "polygon_coords": slot.polygon_coords,
+            "pos_x1": slot.pos_x1, "pos_y1": slot.pos_y1,
+            "pos_x2": slot.pos_x2, "pos_y2": slot.pos_y2,
+        })
+        if central_slot_id:
+            slot.central_slot_id = central_slot_id
+            db.commit()
+            db.refresh(slot)
 
     return slot
 
@@ -67,7 +81,6 @@ def update_slot(slot_id: int, body: ParkingSlotUpdate, db: Session = Depends(get
 
     data = body.model_dump(exclude_unset=True)
 
-    # Recalculate bbox if polygon changed
     if "polygon_coords" in data and data["polygon_coords"]:
         try:
             points = json.loads(data["polygon_coords"])
@@ -84,6 +97,19 @@ def update_slot(slot_id: int, body: ParkingSlotUpdate, db: Session = Depends(get
     db.refresh(slot)
 
     _update_detection_loop(slot.camera_id, db)
+
+    # Push updated polygon to central
+    from app.models.camera import Camera
+    from app.services.central_sync import central_sync
+    if "polygon_coords" in data and slot.central_slot_id:
+        cam = db.query(Camera).filter(Camera.id == slot.camera_id).first()
+        if cam and cam.central_camera_id:
+            central_sync.push_slot_config(cam.central_camera_id, [{
+                "central_slot_id": slot.central_slot_id,
+                "polygon_coords": slot.polygon_coords,
+                "pos_x1": slot.pos_x1, "pos_y1": slot.pos_y1,
+                "pos_x2": slot.pos_x2, "pos_y2": slot.pos_y2,
+            }])
 
     return slot
 
@@ -102,24 +128,33 @@ def delete_slot(slot_id: int, db: Session = Depends(get_db)):
 
 @router.post("/{slot_id}/calibrate")
 def calibrate_slot(slot_id: int, db: Session = Depends(get_db)):
-    """Calibrate a slot with the latest camera frame (empty reference)."""
+    """Calibrate a slot using a live camera frame as the empty reference."""
     slot = db.query(ParkingSlot).filter(ParkingSlot.id == slot_id).first()
     if not slot or not slot.polygon_coords:
         raise HTTPException(400, "Slot not found or no polygon defined")
 
-    # Get latest frame from detection loop
-    from app.main import latest_frames, parking_detector
-    frame = latest_frames.get(slot.camera_id)
-    if frame is None:
-        raise HTTPException(400, "No frame available — ensure camera is capturing")
+    from app.main import parking_detector
+    from app.models.camera import Camera
+    from app.camera.factory import create_camera
+
+    # Always capture a fresh frame so calibration reflects the current (empty) slot state
+    cam_record = db.query(Camera).filter(Camera.id == slot.camera_id).first()
+    if not cam_record:
+        raise HTTPException(400, "Camera not found")
+    camera = create_camera(cam_record.source, cam_record.camera_type)
+    if not camera.open():
+        raise HTTPException(500, "Failed to open camera for calibration")
+    ok, frame = camera.read()
+    camera.release()
+    if not ok or frame is None:
+        raise HTTPException(500, "Failed to capture frame for calibration")
 
     polygon = json.loads(slot.polygon_coords)
     cal_data = parking_detector.calibrate_slot(frame, slot.id, polygon)
 
     if not cal_data:
-        raise HTTPException(500, "Calibration failed")
+        raise HTTPException(500, "Calibration failed — ensure depth model is loaded")
 
-    # Save to DB
     existing = db.query(Calibration).filter(Calibration.slot_id == slot_id).first()
     if existing:
         existing.calibration_data = cal_data
@@ -127,18 +162,23 @@ def calibrate_slot(slot_id: int, db: Session = Depends(get_db)):
         db.add(Calibration(slot_id=slot_id, calibration_data=cal_data))
     db.commit()
 
-    # Update detector
     parking_detector.set_calibration(slot.id, cal_data)
-
-    return {"message": f"Slot {slot.label} calibrated"}
+    return {"message": f"Slot {slot.label} calibrated successfully"}
 
 
 def _update_detection_loop(camera_id: int, db: Session) -> None:
-    """Refresh detection loop with updated slots for a camera."""
+    """Register or refresh camera + slots in the detection loop."""
     from app.main import detection_loop
+    from app.models.camera import Camera
+
+    cam = db.query(Camera).filter(Camera.id == camera_id).first()
+    if not cam:
+        return
+
     slots = db.query(ParkingSlot).filter(ParkingSlot.camera_id == camera_id).all()
     slot_dicts = [
         {"id": s.id, "label": s.label, "polygon_coords": s.polygon_coords}
         for s in slots
     ]
-    detection_loop.update_slots(camera_id, slot_dicts)
+    # add_camera registers new cameras AND updates existing ones
+    detection_loop.add_camera(camera_id, cam.source, slot_dicts, cam.camera_type)

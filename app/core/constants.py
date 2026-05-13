@@ -19,5 +19,5 @@ class CameraStatus(str, enum.Enum):
     FAILED = "FAILED"
 
 
-# YOLO COCO vehicle class IDs
-VEHICLE_CLASS_IDS = {2, 3, 5, 7}  # car, motorcycle, bus, truck
+# YOLO COCO class IDs — swapped to person (0) for testing; restore to {2, 3, 5, 7} for production
+VEHICLE_CLASS_IDS = {0}  # person

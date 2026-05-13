@@ -31,6 +31,8 @@ class CameraResponse(BaseModel):
     frame_width: Optional[float]
     frame_height: Optional[float]
     reference_snapshot_path: Optional[str]
+    central_camera_id: Optional[str] = None
+    central_device_id: Optional[str] = None
 
     class Config:
         from_attributes = True
