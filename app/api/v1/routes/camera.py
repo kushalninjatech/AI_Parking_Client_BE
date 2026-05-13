@@ -32,7 +32,7 @@ def create_camera_endpoint(body: CameraCreate, db: Session = Depends(get_db)):
         "local_id": cam.id,
         "label": cam.label,
         "source": cam.source,
-        "camera_type": cam.camera_type,
+        "camera_type": cam.camera_type.value if hasattr(cam.camera_type, "value") else str(cam.camera_type),
         "frame_width": cam.frame_width,
         "frame_height": cam.frame_height,
     })
@@ -68,7 +68,7 @@ def update_camera(camera_id: int, body: CameraUpdate, db: Session = Depends(get_
         "local_id": cam.id,
         "label": cam.label,
         "source": cam.source,
-        "camera_type": cam.camera_type,
+        "camera_type": cam.camera_type.value if hasattr(cam.camera_type, "value") else str(cam.camera_type),
         "frame_width": cam.frame_width,
         "frame_height": cam.frame_height,
     })
