@@ -66,12 +66,19 @@ def _handle_snapshot(client, command_id: str, payload: dict):
             from app.models.camera import Camera
             from app.camera.factory import create_camera
 
+            import time as _time
+
             db = SessionLocal()
             try:
-                # Use camera_id from payload, or first active camera
-                camera_id = (payload.get("payload") or {}).get("camera_id")
-                if camera_id:
-                    cam = db.query(Camera).filter(Camera.id == int(camera_id), Camera.is_active == True).first()
+                # Find camera by label, id, or first active
+                cmd_payload = payload.get("payload") or {}
+                camera_label = cmd_payload.get("camera_label")
+                camera_id = cmd_payload.get("camera_id")
+
+                if camera_label:
+                    cam = db.query(Camera).filter(Camera.label == camera_label).first()
+                elif camera_id:
+                    cam = db.query(Camera).filter(Camera.id == int(camera_id)).first()
                 else:
                     cam = db.query(Camera).filter(Camera.is_active == True).first()
 
@@ -84,11 +91,17 @@ def _handle_snapshot(client, command_id: str, payload: dict):
                     _publish_ack(client, command_id, "snapshot", "failed", error="Failed to open camera")
                     return
 
-                ok, frame = camera.read()
+                # Retry frame capture (RTSP streams may need warmup)
+                ok, frame = False, None
+                for attempt in range(5):
+                    ok, frame = camera.read()
+                    if ok and frame is not None:
+                        break
+                    _time.sleep(0.5)
                 camera.release()
 
                 if not ok or frame is None:
-                    _publish_ack(client, command_id, "snapshot", "failed", error="Failed to capture frame")
+                    _publish_ack(client, command_id, "snapshot", "failed", error="Failed to capture frame after retries")
                     return
 
                 # Save locally
@@ -232,7 +245,7 @@ def _handle_config_slots(client, command_id: str, payload: dict):
 
             db = SessionLocal()
             try:
-                cam = db.query(Camera).filter(Camera.label == camera_label, Camera.is_active == True).first()
+                cam = db.query(Camera).filter(Camera.label == camera_label).first()
                 if not cam:
                     _publish_ack(client, command_id, "config/slots", "failed", error=f"Camera '{camera_label}' not found")
                     return
@@ -324,7 +337,7 @@ def _handle_calibrate(client, command_id: str, payload: dict):
 
             db = SessionLocal()
             try:
-                cam = db.query(Camera).filter(Camera.label == camera_label, Camera.is_active == True).first()
+                cam = db.query(Camera).filter(Camera.label == camera_label).first()
                 if not cam:
                     _publish_ack(client, command_id, "calibrate", "failed", error=f"Camera '{camera_label}' not found")
                     return
