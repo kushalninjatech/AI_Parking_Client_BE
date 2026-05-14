@@ -37,7 +37,7 @@ def create_slot(body: ParkingSlotCreate, db: Session = Depends(get_db)):
     db.refresh(slot)
 
     _update_detection_loop(slot.camera_id, db)
-    _sync_slots_to_central(slot.camera_id, db)
+    _sync_slots_to_central(slot.camera_id, db, action="create")
 
     return slot
 
@@ -140,8 +140,8 @@ def calibrate_slot(slot_id: int, db: Session = Depends(get_db)):
     return {"message": f"Slot {slot.label} calibrated successfully"}
 
 
-def _sync_slots_to_central(camera_id: int, db: Session) -> None:
-    """Publish all slots for a camera to Central via MQTT (upsert)."""
+def _sync_slots_to_central(camera_id: int, db: Session, action: str = "upsert") -> None:
+    """Publish all slots for a camera to Central via MQTT."""
     from app.main import mqtt_publisher
     from app.models.camera import Camera
 
@@ -150,7 +150,7 @@ def _sync_slots_to_central(camera_id: int, db: Session) -> None:
         return
 
     slots = db.query(ParkingSlot).filter(ParkingSlot.camera_id == camera_id).all()
-    mqtt_publisher.publish_sync_slots("upsert", cam.label, [
+    mqtt_publisher.publish_sync_slots(action, cam.label, [
         {
             "label": s.label,
             "polygon_coords": s.polygon_coords,
