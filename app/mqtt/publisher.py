@@ -53,6 +53,7 @@ class MQTTPublisher:
 
             self._client.on_connect = self._on_connect
             self._client.on_disconnect = self._on_disconnect
+            self._client.on_message = self._on_message
 
             # MQTT 5.0: persistent session (clean_start=False) — broker buffers
             # QoS 1 messages while we're offline. SessionExpiryInterval tells the
@@ -304,6 +305,12 @@ class MQTTPublisher:
         logger.warning("MQTT disconnected: %s — will reconnect with backoff", reason_code)
         if not self._shutdown:
             threading.Thread(target=self._reconnect_loop, daemon=True).start()
+
+    def _on_message(self, client, userdata, msg) -> None:
+        """Route incoming MQTT messages (commands from Central)."""
+        if msg.topic.startswith("cmd/"):
+            from app.mqtt.command_handler import handle_command
+            handle_command(client, userdata, msg)
 
     def _reconnect_loop(self) -> None:
         delay = _RECONNECT_MIN_DELAY
