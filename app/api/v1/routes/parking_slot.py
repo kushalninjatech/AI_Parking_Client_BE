@@ -37,7 +37,7 @@ def create_slot(body: ParkingSlotCreate, db: Session = Depends(get_db)):
     db.refresh(slot)
 
     _update_detection_loop(slot.camera_id, db)
-    _sync_slots_to_central(slot.camera_id, db, action="create")
+    _sync_slots_to_central(slot.camera_id, db, action="full_sync")
 
     return slot
 
@@ -82,7 +82,7 @@ def update_slot(slot_id: int, body: ParkingSlotUpdate, db: Session = Depends(get
     db.refresh(slot)
 
     _update_detection_loop(slot.camera_id, db)
-    _sync_slots_to_central(slot.camera_id, db)
+    _sync_slots_to_central(slot.camera_id, db, action="full_sync")
 
     return slot
 
@@ -96,7 +96,7 @@ def delete_slot(slot_id: int, db: Session = Depends(get_db)):
     db.delete(slot)
     db.commit()
     _update_detection_loop(camera_id, db)
-    _sync_slots_to_central(camera_id, db)
+    _sync_slots_to_central(camera_id, db, action="full_sync")
     return {"message": "Slot deleted"}
 
 
