@@ -54,6 +54,8 @@ def on_state_change(camera_id: int, all_results, changes):
             slot = db.query(ParkingSlot).filter(ParkingSlot.id == r["id"]).first()
             if slot:
                 slot.state = r["state"]
+                vtype = r.get("detected_vehicle_type")
+                slot.detected_vehicle_type = vtype.value if hasattr(vtype, "value") else vtype
         db.commit()
     finally:
         db.close()
@@ -111,7 +113,10 @@ async def snapshot_loop():
                         continue
                     mqtt_publisher.publish_slot_snapshot(
                         cam.label,
-                        [{"label": s.label, "state": s.state} for s in slots],
+                        [{"label": s.label, "state": s.state,
+                          "slot_type": s.slot_type or "GENERAL",
+                          "detected_vehicle_type": s.detected_vehicle_type}
+                         for s in slots],
                     )
                 logger.debug("Snapshot published for %d cameras", len(cameras))
             finally:
@@ -127,6 +132,17 @@ async def lifespan(app: FastAPI):
 
     # Create tables
     Base.metadata.create_all(bind=engine)
+
+    # SQLite doesn't add columns to existing tables via create_all — patch manually
+    from sqlalchemy import inspect, text
+    insp = inspect(engine)
+    cols = [c["name"] for c in insp.get_columns("parking_slots")]
+    with engine.connect() as conn:
+        if "slot_type" not in cols:
+            conn.execute(text("ALTER TABLE parking_slots ADD COLUMN slot_type VARCHAR(20) DEFAULT 'GENERAL' NOT NULL"))
+        if "detected_vehicle_type" not in cols:
+            conn.execute(text("ALTER TABLE parking_slots ADD COLUMN detected_vehicle_type VARCHAR(20)"))
+        conn.commit()
 
     # Load models (graceful — server starts even if models missing)
     try:
@@ -153,7 +169,8 @@ async def lifespan(app: FastAPI):
         cameras = db.query(Camera).filter(Camera.is_active == True).all()
         for cam in cameras:
             slots = [
-                {"id": s.id, "label": s.label, "polygon_coords": s.polygon_coords}
+                {"id": s.id, "label": s.label, "polygon_coords": s.polygon_coords,
+                 "slot_type": s.slot_type or "GENERAL"}
                 for s in cam.slots if s.polygon_coords
             ]
             if slots:

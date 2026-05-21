@@ -9,7 +9,7 @@ import cv2
 import numpy as np
 
 from app.core.config import settings
-from app.core.constants import VEHICLE_CLASS_IDS
+from app.core.constants import COCO_VEHICLE_MAP
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +95,7 @@ class YOLODetector:
 
             if conf < settings.YOLO_CONFIDENCE:
                 continue
-            if class_id not in VEHICLE_CLASS_IDS:
+            if class_id not in COCO_VEHICLE_MAP:
                 continue
 
             cx, cy, w, h = row[:4]

@@ -7,7 +7,7 @@ from typing import Dict, List, Optional, Tuple
 import cv2
 import numpy as np
 
-from app.core.constants import SlotState
+from app.core.constants import COCO_VEHICLE_MAP, VEHICLE_PRIORITY, SlotState, SlotType, VehicleType
 from app.detection.yolo_detector import YOLODetector
 from app.detection.depth_estimator import DepthEstimator
 
@@ -102,23 +102,31 @@ class ParkingDetector:
                 if isinstance(slot["polygon_coords"], str)
                 else slot["polygon_coords"]
             )
+            slot_type = SlotType(slot.get("slot_type", SlotType.GENERAL.value))
+            base = {"id": slot["id"], "label": slot["label"], "slot_type": slot_type}
+
             if not polygon:
-                results.append({"id": slot["id"], "label": slot["label"],
-                                 "state": SlotState.EMPTY, "confidence": 0.0})
+                results.append({**base, "state": SlotState.EMPTY, "confidence": 0.0,
+                                "detected_vehicle_type": None, "is_mismatched": False})
                 continue
 
+            # Collect all vehicle detections whose centroids fall inside this polygon
             polygon_np = np.array(polygon, dtype=np.int32)
-            has_vehicle, vehicle_conf = False, 0.0
+            matched_vehicles = []
             for det in vehicle_detections:
                 cx, cy = det["centroid"]
                 if cv2.pointPolygonTest(polygon_np, (float(cx), float(cy)), False) >= 0:
-                    has_vehicle, vehicle_conf = True, det["confidence"]
-                    break
+                    vtype = COCO_VEHICLE_MAP.get(det["class_id"])
+                    if vtype:
+                        matched_vehicles.append((vtype, det["confidence"]))
 
-            if has_vehicle:
+            if matched_vehicles:
+                # Largest vehicle wins (highest priority)
+                best_type, best_conf = max(matched_vehicles, key=lambda x: VEHICLE_PRIORITY.get(x[0], 0))
+                is_mismatched = slot_type != SlotType.GENERAL and best_type.value != slot_type.value
                 self._obstruct_streak[slot["id"]] = 0
-                results.append({"id": slot["id"], "label": slot["label"],
-                                 "state": SlotState.VEHICLE, "confidence": vehicle_conf})
+                results.append({**base, "state": SlotState.VEHICLE, "confidence": best_conf,
+                                "detected_vehicle_type": best_type, "is_mismatched": is_mismatched})
                 continue
 
             if slot["id"] in self._calibrations:
@@ -130,11 +138,11 @@ class ParkingDetector:
                     self._obstruct_streak[sid] = 0
                 confirmed = self._obstruct_streak.get(sid, 0) >= CONFIRM_FRAMES
                 state = SlotState.OBSTRUCTED if confirmed else SlotState.EMPTY
-                results.append({"id": slot["id"], "label": slot["label"],
-                                 "state": state, "confidence": confidence if confirmed else 0.0})
+                results.append({**base, "state": state, "confidence": confidence if confirmed else 0.0,
+                                "detected_vehicle_type": None, "is_mismatched": False})
             else:
-                results.append({"id": slot["id"], "label": slot["label"],
-                                 "state": SlotState.EMPTY, "confidence": 0.0})
+                results.append({**base, "state": SlotState.EMPTY, "confidence": 0.0,
+                                "detected_vehicle_type": None, "is_mismatched": False})
 
         return results
 

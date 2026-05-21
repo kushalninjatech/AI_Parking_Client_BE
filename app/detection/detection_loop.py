@@ -9,7 +9,7 @@ import numpy as np
 
 from app.camera.factory import create_camera
 from app.core.config import settings
-from app.core.constants import SlotState
+from app.core.constants import SlotState, VehicleType
 from app.detection.detector import ParkingDetector
 
 logger = logging.getLogger(__name__)
@@ -25,6 +25,7 @@ class DetectionLoop:
         self._camera_configs: Dict[int, Dict] = {}
         self._running = False
         self._slot_states: Dict[int, SlotState] = {}
+        self._slot_vehicle_types: Dict[int, Optional[VehicleType]] = {}
         self._on_state_change = None
         self._on_frame_captured = None
         self._last_detection_time: Dict[int, float] = {}  # camera_id → last full-detection time
@@ -121,7 +122,8 @@ class DetectionLoop:
             return
 
         slot_dicts = [
-            {"id": s["id"], "label": s["label"], "polygon_coords": s["polygon_coords"]}
+            {"id": s["id"], "label": s["label"], "polygon_coords": s["polygon_coords"],
+             "slot_type": s.get("slot_type", "GENERAL")}
             for s in slots if s.get("polygon_coords")
         ]
         if not slot_dicts:
@@ -133,13 +135,16 @@ class DetectionLoop:
         for r in results:
             slot_id = r["id"]
             new_state = r["state"]
+            new_vtype = r.get("detected_vehicle_type")
             old_state = self._slot_states.get(slot_id)
-            if old_state != new_state:
+            old_vtype = self._slot_vehicle_types.get(slot_id)
+            if old_state != new_state or old_vtype != new_vtype:
                 self._slot_states[slot_id] = new_state
+                self._slot_vehicle_types[slot_id] = new_vtype
                 changes.append(r)
                 logger.info(
-                    "Slot %s: %s → %s (conf=%.2f)",
-                    r["label"], old_state, new_state, r["confidence"],
+                    "Slot %s: %s(%s) → %s(%s) (conf=%.2f)",
+                    r["label"], old_state, old_vtype, new_state, new_vtype, r["confidence"],
                 )
 
         if self._on_state_change and results:

@@ -15,7 +15,7 @@ from paho.mqtt.properties import Properties
 from paho.mqtt.packettypes import PacketTypes
 
 from app.core.config import settings
-from app.core.constants import SlotState
+from app.core.constants import SlotState, SlotType, VehicleType
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +105,9 @@ class MQTTPublisher:
                     "slot_label": s["label"],
                     "state": s["state"].value if isinstance(s["state"], SlotState) else s["state"],
                     "confidence": round(float(s.get("confidence", 0.0)), 4),
+                    "slot_type": s["slot_type"].value if isinstance(s.get("slot_type"), SlotType) else s.get("slot_type"),
+                    "detected_vehicle_type": s["detected_vehicle_type"].value if isinstance(s.get("detected_vehicle_type"), VehicleType) else s.get("detected_vehicle_type"),
+                    "is_mismatched": s.get("is_mismatched", False),
                 }
                 for s in changes
             ],
@@ -126,6 +129,8 @@ class MQTTPublisher:
                 {
                     "slot_label": s["label"],
                     "state": s["state"].value if isinstance(s["state"], SlotState) else s["state"],
+                    "slot_type": s.get("slot_type", "GENERAL"),
+                    "detected_vehicle_type": s.get("detected_vehicle_type"),
                 }
                 for s in slots
             ],

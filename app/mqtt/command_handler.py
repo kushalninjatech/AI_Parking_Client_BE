@@ -270,12 +270,15 @@ def _handle_config_slots(client, command_id: str, payload: dict):
                         except (json.JSONDecodeError, IndexError):
                             pass
 
+                    slot_type = slot_data.get("slot_type", "GENERAL")
+
                     existing = db.query(ParkingSlot).filter(
                         ParkingSlot.camera_id == cam.id, ParkingSlot.label == label
                     ).first()
 
                     if existing:
                         existing.polygon_coords = polygon_coords
+                        existing.slot_type = slot_type
                         existing.pos_x1 = pos_x1
                         existing.pos_y1 = pos_y1
                         existing.pos_x2 = pos_x2
@@ -285,6 +288,7 @@ def _handle_config_slots(client, command_id: str, payload: dict):
                             label=label,
                             camera_id=cam.id,
                             state=SlotState.EMPTY,
+                            slot_type=slot_type,
                             polygon_coords=polygon_coords,
                             pos_x1=pos_x1, pos_y1=pos_y1,
                             pos_x2=pos_x2, pos_y2=pos_y2,
@@ -302,7 +306,8 @@ def _handle_config_slots(client, command_id: str, payload: dict):
                 from app.main import detection_loop
                 all_slots = db.query(ParkingSlot).filter(ParkingSlot.camera_id == cam.id).all()
                 slot_dicts = [
-                    {"id": s.id, "label": s.label, "polygon_coords": s.polygon_coords}
+                    {"id": s.id, "label": s.label, "polygon_coords": s.polygon_coords,
+                     "slot_type": s.slot_type or "GENERAL"}
                     for s in all_slots
                 ]
                 detection_loop.add_camera(cam.id, cam.source, slot_dicts, cam.camera_type)
