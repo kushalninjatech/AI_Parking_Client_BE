@@ -46,11 +46,6 @@ logs/
 # Docker
 docker-compose.override.yml
 
-# YOLO / ML models
-*.pt
-*.onnx
-*.engine
-# models/
 
 # mypy / ruff
 .mypy_cache/

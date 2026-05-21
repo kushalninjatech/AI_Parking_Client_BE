@@ -1,0 +1,23 @@
+[project]
+name = "ai-parking-client-be"
+version = "0.1.0"
+description = "AI Parking Client Backend (FastAPI)"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn>=0.30.0",
+    "sqlalchemy>=2.0.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "opencv-python-headless>=4.9",
+    "numpy>=1.24,<3.0",
+    "ncnn>=1.0",
+    "onnxruntime>=1.17",
+    "paho-mqtt>=2.0.0",
+    "psutil>=5.9.0",
+    "python-multipart>=0.0.9",
+]
+
+# picamera2 is system-provided on Raspberry Pi; install via apt, not uv.
+# Optional extras can be declared here later (e.g. dev, test).
