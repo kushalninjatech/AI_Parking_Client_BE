@@ -153,6 +153,7 @@ def _sync_slots_to_central(camera_id: int, db: Session, action: str = "upsert") 
     mqtt_publisher.publish_sync_slots(action, cam.label, [
         {
             "label": s.label,
+            "slot_type": s.slot_type or "GENERAL",
             "polygon_coords": s.polygon_coords,
             "pos_x1": s.pos_x1, "pos_y1": s.pos_y1,
             "pos_x2": s.pos_x2, "pos_y2": s.pos_y2,
@@ -172,7 +173,8 @@ def _update_detection_loop(camera_id: int, db: Session) -> None:
 
     slots = db.query(ParkingSlot).filter(ParkingSlot.camera_id == camera_id).all()
     slot_dicts = [
-        {"id": s.id, "label": s.label, "polygon_coords": s.polygon_coords}
+        {"id": s.id, "label": s.label, "polygon_coords": s.polygon_coords,
+         "slot_type": s.slot_type or "GENERAL"}
         for s in slots
     ]
     # add_camera registers new cameras AND updates existing ones
