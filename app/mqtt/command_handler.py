@@ -179,8 +179,8 @@ def _handle_config_camera(client, command_id: str, payload: dict):
             from app.models.camera import Camera
             from app.core.constants import CameraType, CameraStatus
 
+            action = payload.get("action", "create")
             camera_data = payload.get("payload", {})
-            action = camera_data.get("action", "create")
             label = camera_data.get("label", "")
             source = camera_data.get("source", "0")
             camera_type = camera_data.get("camera_type", "USB")
