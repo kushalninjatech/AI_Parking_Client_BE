@@ -1,0 +1,87 @@
+"""MinIO service — uploads cropped slot images to S3-compatible object storage."""
+
+import io
+import logging
+import time
+from typing import Optional
+
+import cv2
+import numpy as np
+from minio import Minio
+
+from app.core.config import settings
+
+logger = logging.getLogger(__name__)
+
+_client: Optional[Minio] = None
+
+
+def get_minio_client() -> Optional[Minio]:
+    global _client
+    if _client is None:
+        if not settings.MINIO_ACCESS_KEY or not settings.MINIO_SECRET_KEY:
+            logger.warning("MinIO credentials not configured — image upload disabled")
+            return None
+        _client = Minio(
+            settings.MINIO_ENDPOINT,
+            access_key=settings.MINIO_ACCESS_KEY,
+            secret_key=settings.MINIO_SECRET_KEY,
+            secure=settings.MINIO_SECURE,
+        )
+    return _client
+
+
+def upload_slot_image(
+    frame: np.ndarray,
+    polygon_coords: list,
+    device_id: str,
+    camera_label: str,
+    slot_label: str,
+) -> Optional[str]:
+    """Crop slot region from frame and upload to MinIO.
+
+    Returns the public URL or None on failure.
+    """
+    client = get_minio_client()
+    if client is None:
+        return None
+
+    try:
+        # Crop slot ROI using polygon bounding box
+        pts = np.array(polygon_coords, dtype=np.int32)
+        x1, y1 = pts.min(axis=0)
+        x2, y2 = pts.max(axis=0)
+        h, w = frame.shape[:2]
+        x1, y1 = max(0, x1), max(0, y1)
+        x2, y2 = min(w, x2), min(h, y2)
+        if x2 <= x1 or y2 <= y1:
+            logger.warning("Invalid crop bounds for slot %s", slot_label)
+            return None
+
+        cropped = frame[y1:y2, x1:x2]
+
+        # Encode as JPEG
+        ok, buf = cv2.imencode(".jpg", cropped, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        if not ok:
+            logger.warning("Failed to encode slot image for %s", slot_label)
+            return None
+
+        data = buf.tobytes()
+        ts = int(time.time())
+        object_name = f"detections/{device_id}/{camera_label}/{slot_label}/{ts}.jpg"
+
+        client.put_object(
+            settings.MINIO_BUCKET,
+            object_name,
+            io.BytesIO(data),
+            len(data),
+            content_type="image/jpeg",
+        )
+
+        scheme = "https" if settings.MINIO_SECURE else "http"
+        url = f"{scheme}://{settings.MINIO_ENDPOINT}/{settings.MINIO_BUCKET}/{object_name}"
+        return url
+
+    except Exception:
+        logger.exception("Failed to upload slot image for %s", slot_label)
+        return None

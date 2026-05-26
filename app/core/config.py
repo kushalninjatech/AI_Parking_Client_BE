@@ -24,6 +24,13 @@ class Settings(BaseSettings):
     DEPTH_MODEL_PATH: str = "models/onnx/model_quantized.onnx"
     DEPTH_INPUT_SIZE: int = 384
 
+    # MinIO
+    MINIO_ENDPOINT: str = "api-minio.projectanddemoserver.com"
+    MINIO_ACCESS_KEY: str = ""
+    MINIO_SECRET_KEY: str = ""
+    MINIO_SECURE: bool = True
+    MINIO_BUCKET: str = "ai-parking"
+
     # Server
     APP_HOST: str = "0.0.0.0"
     APP_PORT: int = 8300

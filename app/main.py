@@ -38,16 +38,28 @@ mqtt_publisher = MQTTPublisher(db_factory=SessionLocal)
 latest_frames = {}
 
 
-def on_state_change(camera_id: int, all_results, changes):
+def on_state_change(camera_id: int, all_results, changes, frame):
     """Called when detection loop produces results."""
+    import json
     from app.db.session import SessionLocal
     from app.models.parking_slot import ParkingSlot
     from app.models.camera import Camera
+    from app.services.minio_service import upload_slot_image
 
     db = SessionLocal()
     try:
         cam = db.query(Camera).filter(Camera.id == camera_id).first()
         camera_label = cam.label if cam else f"cam-{camera_id}"
+
+        # Build polygon lookup for changed slots (needed for cropping)
+        slot_polygons = {}
+        for r in changes:
+            slot = db.query(ParkingSlot).filter(ParkingSlot.id == r["id"]).first()
+            if slot and slot.polygon_coords:
+                coords = slot.polygon_coords
+                if isinstance(coords, str):
+                    coords = json.loads(coords)
+                slot_polygons[r["id"]] = coords
 
         # Update slot states in local DB
         for r in all_results:
@@ -59,6 +71,17 @@ def on_state_change(camera_id: int, all_results, changes):
         db.commit()
     finally:
         db.close()
+
+    # Upload cropped slot images to MinIO for changed slots
+    if changes and frame is not None:
+        for change in changes:
+            polygon = slot_polygons.get(change["id"])
+            if polygon:
+                url = upload_slot_image(
+                    frame, polygon, settings.DEVICE_ID, camera_label, change["label"],
+                )
+                if url:
+                    change["image_url"] = url
 
     # Publish only changed slots to MQTT events topic.
     # Full-state snapshots handled by snapshot_loop on timer (MQTT_SNAPSHOT_INTERVAL).

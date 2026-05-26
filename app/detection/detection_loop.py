@@ -148,4 +148,4 @@ class DetectionLoop:
                 )
 
         if self._on_state_change and results:
-            self._on_state_change(camera_id, results, changes)
+            self._on_state_change(camera_id, results, changes, frame)
