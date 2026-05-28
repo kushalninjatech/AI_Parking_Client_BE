@@ -57,13 +57,14 @@ def _publish_ack(client, command_id: str, action: str, status: str, error: str =
 
 
 def _handle_snapshot(client, command_id: str, payload: dict):
-    """Capture a frame from the first active camera and return as base64."""
+    """Capture a frame from a camera. If slot_label is provided, crop + upload to MinIO."""
     _publish_ack(client, command_id, "snapshot", "acknowledged")
 
     def _do_snapshot():
         try:
             from app.db.session import SessionLocal
             from app.models.camera import Camera
+            from app.models.parking_slot import ParkingSlot
             from app.camera.factory import create_camera
 
             import time as _time
@@ -74,6 +75,7 @@ def _handle_snapshot(client, command_id: str, payload: dict):
                 cmd_payload = payload.get("payload") or {}
                 camera_label = cmd_payload.get("camera_label")
                 camera_id = cmd_payload.get("camera_id")
+                slot_label = cmd_payload.get("slot_label")
 
                 if camera_label:
                     cam = db.query(Camera).filter(Camera.label == camera_label).first()
@@ -104,12 +106,46 @@ def _handle_snapshot(client, command_id: str, payload: dict):
                     _publish_ack(client, command_id, "snapshot", "failed", error="Failed to capture frame after retries")
                     return
 
-                # Save locally
+                # Slot-level snapshot: crop polygon + upload to MinIO
+                if slot_label:
+                    slot = db.query(ParkingSlot).filter(
+                        ParkingSlot.camera_id == cam.id,
+                        ParkingSlot.label == slot_label,
+                    ).first()
+                    if not slot or not slot.polygon_coords:
+                        _publish_ack(client, command_id, "snapshot", "failed", error=f"Slot '{slot_label}' not found or no polygon")
+                        return
+
+                    from app.services.minio_service import upload_slot_image
+                    polygon = slot.polygon_coords
+                    if isinstance(polygon, str):
+                        polygon = json.loads(polygon)
+
+                    image_url = upload_slot_image(frame, polygon, settings.DEVICE_ID, cam.label, slot_label)
+                    if not image_url:
+                        _publish_ack(client, command_id, "snapshot", "failed", error="MinIO upload failed")
+                        return
+
+                    import time
+                    result_topic = f"parking/{settings.DEVICE_ID}/cmd/result"
+                    result_payload = {
+                        "device_id": settings.DEVICE_ID,
+                        "command_id": command_id,
+                        "action": "slot_snapshot",
+                        "camera_label": cam.label,
+                        "slot_label": slot_label,
+                        "image_url": image_url,
+                        "timestamp": time.time(),
+                    }
+                    client.publish(result_topic, json.dumps(result_payload), qos=1)
+                    _publish_ack(client, command_id, "snapshot", "completed")
+                    return
+
+                # Full-frame snapshot: save locally + send base64
                 os.makedirs("data/snapshots", exist_ok=True)
                 path = f"data/snapshots/cmd_snapshot_{cam.id}.jpg"
                 cv2.imwrite(path, frame)
 
-                # Encode and publish result
                 _, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
                 b64 = base64.b64encode(jpeg.tobytes()).decode()
 
