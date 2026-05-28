@@ -117,6 +117,10 @@ class ParkingDetector:
                 cx, cy = det["centroid"]
                 if cv2.pointPolygonTest(polygon_np, (float(cx), float(cy)), False) >= 0:
                     vtype = COCO_VEHICLE_MAP.get(det["class_id"])
+                    logger.info(
+                        "Slot %s: matched class_id=%d (%s) conf=%.2f centroid=(%d,%d)",
+                        slot["label"], det["class_id"], vtype, det["confidence"], cx, cy,
+                    )
                     if vtype:
                         matched_vehicles.append((vtype, det["confidence"]))
 

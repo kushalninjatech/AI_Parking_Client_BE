@@ -29,6 +29,9 @@ class DetectionLoop:
         self._on_state_change = None
         self._on_frame_captured = None
         self._last_detection_time: Dict[int, float] = {}  # camera_id → last full-detection time
+        # Debounce: track consecutive detections of a new state before confirming
+        self._debounce_counters: Dict[int, int] = {}  # slot_id → consecutive count
+        self._debounce_pending: Dict[int, tuple] = {}  # slot_id → (pending_state, pending_vtype)
 
     def set_callbacks(self, on_state_change=None, on_frame_captured=None) -> None:
         self._on_state_change = on_state_change
@@ -131,6 +134,9 @@ class DetectionLoop:
 
         results = await asyncio.to_thread(self._run_detection, frame, slot_dicts)
 
+        debounce_enabled = settings.DETECTION_DEBOUNCE_ENABLED
+        debounce_threshold = settings.DETECTION_DEBOUNCE_COUNT
+
         changes = []
         for r in results:
             slot_id = r["id"]
@@ -138,13 +144,51 @@ class DetectionLoop:
             new_vtype = r.get("detected_vehicle_type")
             old_state = self._slot_states.get(slot_id)
             old_vtype = self._slot_vehicle_types.get(slot_id)
-            if old_state != new_state or old_vtype != new_vtype:
+
+            if old_state == new_state and old_vtype == new_vtype:
+                # No change — reset debounce counter
+                self._debounce_counters.pop(slot_id, None)
+                self._debounce_pending.pop(slot_id, None)
+                continue
+
+            if not debounce_enabled:
+                # Debounce disabled — report immediately
                 self._slot_states[slot_id] = new_state
                 self._slot_vehicle_types[slot_id] = new_vtype
                 changes.append(r)
                 logger.info(
                     "Slot %s: %s(%s) → %s(%s) (conf=%.2f)",
                     r["label"], old_state, old_vtype, new_state, new_vtype, r["confidence"],
+                )
+                continue
+
+            # Debounce: check if this is the same pending state
+            pending = self._debounce_pending.get(slot_id)
+            if pending and pending == (new_state, new_vtype):
+                self._debounce_counters[slot_id] = self._debounce_counters.get(slot_id, 1) + 1
+            else:
+                # New pending state — reset counter
+                self._debounce_pending[slot_id] = (new_state, new_vtype)
+                self._debounce_counters[slot_id] = 1
+
+            count = self._debounce_counters[slot_id]
+            if count >= debounce_threshold:
+                # Confirmed — report the change
+                self._slot_states[slot_id] = new_state
+                self._slot_vehicle_types[slot_id] = new_vtype
+                self._debounce_counters.pop(slot_id, None)
+                self._debounce_pending.pop(slot_id, None)
+                changes.append(r)
+                logger.info(
+                    "Slot %s: %s(%s) → %s(%s) (conf=%.2f, debounce=%d/%d)",
+                    r["label"], old_state, old_vtype, new_state, new_vtype,
+                    r["confidence"], count, debounce_threshold,
+                )
+            else:
+                logger.debug(
+                    "Slot %s: pending %s(%s) → %s(%s) (%d/%d)",
+                    r["label"], old_state, old_vtype, new_state, new_vtype,
+                    count, debounce_threshold,
                 )
 
         if self._on_state_change and results:

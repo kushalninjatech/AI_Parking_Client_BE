@@ -19,6 +19,8 @@ class Settings(BaseSettings):
 
     # Detection
     DETECTION_INTERVAL: int = 30
+    DETECTION_DEBOUNCE_ENABLED: bool = True
+    DETECTION_DEBOUNCE_COUNT: int = 3  # consecutive same-state detections before reporting change
     YOLO_MODEL_PATH: str = "models/yolo26n_ncnn_model"
     YOLO_CONFIDENCE: float = 0.15
     DEPTH_MODEL_PATH: str = "models/onnx/model_quantized.onnx"
