@@ -32,11 +32,12 @@ class CameraStatus(str, enum.Enum):
 
 
 # COCO class_id → VehicleType mapping
-# 0=person (TESTING), 2=car, 3=motorcycle
+# 2=car, 3=motorcycle, 5=bus, 7=truck
 COCO_VEHICLE_MAP: Dict[int, VehicleType] = {
-    0: VehicleType.CAR,           # person — TESTING ONLY
     2: VehicleType.CAR,           # car
     3: VehicleType.TWO_WHEELER,   # motorcycle
+    5: VehicleType.CAR,           # bus
+    7: VehicleType.CAR,           # truck
 }
 
 # Priority for "largest vehicle wins" when multiple overlap a slot polygon
