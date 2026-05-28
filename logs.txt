@@ -1,0 +1,1 @@
+sudo journalctl -u ai-parking-be.service -f
