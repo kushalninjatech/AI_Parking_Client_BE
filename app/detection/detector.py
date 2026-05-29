@@ -7,6 +7,7 @@ from typing import Dict, List, Optional, Tuple
 import cv2
 import numpy as np
 
+from app.core.config import settings
 from app.core.constants import COCO_VEHICLE_MAP, VEHICLE_PRIORITY, SlotState, SlotType, VehicleType
 from app.detection.yolo_detector import YOLODetector
 from app.detection.depth_estimator import DepthEstimator
@@ -110,16 +111,33 @@ class ParkingDetector:
                                 "detected_vehicle_type": None, "is_mismatched": False})
                 continue
 
-            # Collect all vehicle detections whose centroids fall inside this polygon
+            # Collect all vehicle detections that overlap with this polygon
             polygon_np = np.array(polygon, dtype=np.int32)
+            polygon_area = cv2.contourArea(polygon_np)
+            if polygon_area < 1:
+                polygon_area = 1
+            overlap_threshold = settings.SLOT_OVERLAP_THRESHOLD
+
             matched_vehicles = []
             for det in vehicle_detections:
+                # Build bbox as a polygon (4 corners)
+                x1, y1, x2, y2 = det["bbox"]
+                bbox_poly = np.array([[x1, y1], [x2, y1], [x2, y2], [x1, y2]], dtype=np.float32)
+                slot_poly = polygon_np.astype(np.float32)
+
+                # Compute intersection area
+                ret, intersection = cv2.intersectConvexConvex(bbox_poly, slot_poly)
+                overlap_ratio = ret / polygon_area if ret > 0 else 0
+
+                # Match if centroid inside OR bbox covers enough of the polygon
                 cx, cy = det["centroid"]
-                if cv2.pointPolygonTest(polygon_np, (float(cx), float(cy)), False) >= 0:
+                centroid_inside = cv2.pointPolygonTest(polygon_np, (float(cx), float(cy)), False) >= 0
+
+                if centroid_inside or overlap_ratio >= overlap_threshold:
                     vtype = COCO_VEHICLE_MAP.get(det["class_id"])
                     logger.info(
-                        "Slot %s: matched class_id=%d (%s) conf=%.2f centroid=(%d,%d)",
-                        slot["label"], det["class_id"], vtype, det["confidence"], cx, cy,
+                        "Slot %s: matched class_id=%d (%s) conf=%.2f centroid=(%d,%d) overlap=%.0f%%",
+                        slot["label"], det["class_id"], vtype, det["confidence"], cx, cy, overlap_ratio * 100,
                     )
                     if vtype:
                         matched_vehicles.append((vtype, det["confidence"]))
