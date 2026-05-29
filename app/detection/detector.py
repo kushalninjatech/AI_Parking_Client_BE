@@ -111,55 +111,22 @@ class ParkingDetector:
                                 "detected_vehicle_type": None, "is_mismatched": False})
                 continue
 
-            # Collect all vehicle detections that overlap with this polygon
+            # Collect all vehicle detections whose centroids fall inside this polygon
             polygon_np = np.array(polygon, dtype=np.int32)
-            polygon_area = cv2.contourArea(polygon_np)
-            if polygon_area < 1:
-                polygon_area = 1
-            overlap_threshold = settings.SLOT_OVERLAP_THRESHOLD
-
+            px_min, py_min = polygon_np.min(axis=0)
+            px_max, py_max = polygon_np.max(axis=0)
+            logger.info(
+                "Slot %s: polygon=(%d,%d)-(%d,%d), %d vehicles to check",
+                slot["label"], px_min, py_min, px_max, py_max, len(vehicle_detections),
+            )
             matched_vehicles = []
             for det in vehicle_detections:
                 cx, cy = det["centroid"]
-                centroid_inside = cv2.pointPolygonTest(polygon_np, (float(cx), float(cy)), False) >= 0
-
-                # Compute overlap: count polygon vertices inside bbox + bbox corners inside polygon
-                overlap_ratio = 0.0
-                if not centroid_inside:
-                    x1, y1, x2, y2 = det["bbox"]
-                    # Quick check: do bounding boxes even overlap?
-                    px_min, py_min = polygon_np.min(axis=0)
-                    px_max, py_max = polygon_np.max(axis=0)
-                    if x2 > px_min and x1 < px_max and y2 > py_min and y1 < py_max:
-                        # Use mask-based intersection (works for any polygon shape)
-                        bx1 = max(0, min(int(px_min), int(x1)))
-                        by1 = max(0, min(int(py_min), int(y1)))
-                        bx2 = max(int(px_max), int(x2))
-                        by2 = max(int(py_max), int(y2))
-                        w, h = bx2 - bx1, by2 - by1
-                        if w > 0 and h > 0:
-                            # Scale down for speed if region is large
-                            scale = min(1.0, 200.0 / max(w, h))
-                            sw, sh = max(1, int(w * scale)), max(1, int(h * scale))
-                            # Slot mask
-                            shifted_poly = ((polygon_np - [bx1, by1]) * scale).astype(np.int32)
-                            slot_mask = np.zeros((sh, sw), dtype=np.uint8)
-                            cv2.fillPoly(slot_mask, [shifted_poly], 255)
-                            # Bbox mask
-                            bx1r, by1r = int((x1 - bx1) * scale), int((y1 - by1) * scale)
-                            bx2r, by2r = int((x2 - bx1) * scale), int((y2 - by1) * scale)
-                            bbox_mask = np.zeros((sh, sw), dtype=np.uint8)
-                            bbox_mask[max(0,by1r):min(sh,by2r), max(0,bx1r):min(sw,bx2r)] = 255
-                            # Intersection
-                            inter = cv2.countNonZero(cv2.bitwise_and(slot_mask, bbox_mask))
-                            slot_pixels = cv2.countNonZero(slot_mask)
-                            overlap_ratio = inter / slot_pixels if slot_pixels > 0 else 0
-
-                if centroid_inside or overlap_ratio >= overlap_threshold:
+                if cv2.pointPolygonTest(polygon_np, (float(cx), float(cy)), False) >= 0:
                     vtype = COCO_VEHICLE_MAP.get(det["class_id"])
                     logger.info(
-                        "Slot %s: matched class_id=%d (%s) conf=%.2f centroid=(%d,%d) overlap=%.0f%%",
-                        slot["label"], det["class_id"], vtype, det["confidence"], cx, cy, overlap_ratio * 100,
+                        "Slot %s: matched class_id=%d (%s) conf=%.2f centroid=(%d,%d)",
+                        slot["label"], det["class_id"], vtype, det["confidence"], cx, cy,
                     )
                     if vtype:
                         matched_vehicles.append((vtype, det["confidence"]))
