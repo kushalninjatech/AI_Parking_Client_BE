@@ -13,7 +13,7 @@ from app.core.constants import COCO_VEHICLE_MAP
 
 logger = logging.getLogger(__name__)
 
-YOLO_INPUT_SIZE = 640
+YOLO_INPUT_SIZE = settings.YOLO_INPUT_SIZE
 
 
 class YOLODetector:
