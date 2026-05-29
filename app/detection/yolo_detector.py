@@ -32,7 +32,10 @@ class YOLODetector:
             self._net.load_param(param_path)
             self._net.load_model(bin_path)
             self._loaded = True
-            logger.info("YOLO model loaded from %s", settings.YOLO_MODEL_PATH)
+            logger.info(
+                "YOLO model loaded: path=%s input_size=%d confidence=%.2f",
+                settings.YOLO_MODEL_PATH, YOLO_INPUT_SIZE, settings.YOLO_CONFIDENCE,
+            )
             return True
         except Exception:
             logger.exception("Failed to load YOLO model")
