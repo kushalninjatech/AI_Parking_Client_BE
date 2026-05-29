@@ -37,9 +37,9 @@ class DetectionLoop:
         self._on_state_change = on_state_change
         self._on_frame_captured = on_frame_captured
 
-    def add_camera(self, camera_id: int, source: str, slots: List[Dict], camera_type: str = None) -> None:
-        self._camera_configs[camera_id] = {"source": source, "slots": slots, "camera_type": camera_type}
-        logger.info("Camera %d registered with %d slots", camera_id, len(slots))
+    def add_camera(self, camera_id: int, source: str, slots: List[Dict], camera_type: str = None, label: str = None) -> None:
+        self._camera_configs[camera_id] = {"source": source, "slots": slots, "camera_type": camera_type, "label": label or str(camera_id)}
+        logger.info("Camera %s (%d) registered with %d slots", label or camera_id, camera_id, len(slots))
 
     def remove_camera(self, camera_id: int) -> None:
         self._camera_configs.pop(camera_id, None)
@@ -99,9 +99,9 @@ class DetectionLoop:
             logger.warning("Failed to capture from camera %d", camera_id)
         return ok, frame
 
-    def _run_detection(self, frame: np.ndarray, slot_dicts: List[Dict]) -> List[Dict]:
+    def _run_detection(self, frame: np.ndarray, slot_dicts: List[Dict], camera_label: str = "") -> List[Dict]:
         """Run YOLO + depth inference. Runs in a thread."""
-        return self._detector.detect_frame(frame, slot_dicts)
+        return self._detector.detect_frame(frame, slot_dicts, camera_label=camera_label)
 
     # ------------------------------------------------------------------
 
@@ -132,7 +132,8 @@ class DetectionLoop:
         if not slot_dicts:
             return
 
-        results = await asyncio.to_thread(self._run_detection, frame, slot_dicts)
+        camera_label = config.get("label", str(camera_id))
+        results = await asyncio.to_thread(self._run_detection, frame, slot_dicts, camera_label)
 
         debounce_enabled = settings.DETECTION_DEBOUNCE_ENABLED
         debounce_threshold = settings.DETECTION_DEBOUNCE_COUNT

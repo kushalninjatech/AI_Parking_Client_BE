@@ -178,4 +178,4 @@ def _update_detection_loop(camera_id: int, db: Session) -> None:
         for s in slots
     ]
     # add_camera registers new cameras AND updates existing ones
-    detection_loop.add_camera(camera_id, cam.source, slot_dicts, cam.camera_type)
+    detection_loop.add_camera(camera_id, cam.source, slot_dicts, cam.camera_type, cam.label)

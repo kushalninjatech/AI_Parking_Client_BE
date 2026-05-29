@@ -346,7 +346,7 @@ def _handle_config_slots(client, command_id: str, payload: dict):
                      "slot_type": s.slot_type or "GENERAL"}
                     for s in all_slots
                 ]
-                detection_loop.add_camera(cam.id, cam.source, slot_dicts, cam.camera_type)
+                detection_loop.add_camera(cam.id, cam.source, slot_dicts, cam.camera_type, cam.label)
 
                 logger.info("Synced %d slots for camera '%s' from Central", len(slots_data), camera_label)
                 _publish_ack(client, command_id, "config/slots", "completed")

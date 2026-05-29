@@ -41,7 +41,7 @@ class YOLODetector:
             logger.exception("Failed to load YOLO model")
             return False
 
-    def detect(self, frame: np.ndarray) -> List[Dict]:
+    def detect(self, frame: np.ndarray, camera_label: str = "") -> List[Dict]:
         """Run YOLO on full frame. Returns list of vehicle detections.
 
         Each detection: {
@@ -55,8 +55,10 @@ class YOLODetector:
             return []
 
         import ncnn
+        import time
 
         img_h, img_w = frame.shape[:2]
+        t0 = time.monotonic()
 
         # Letterbox resize
         scale = min(YOLO_INPUT_SIZE / img_w, YOLO_INPUT_SIZE / img_h)
@@ -80,6 +82,11 @@ class YOLODetector:
 
         # Post-process: NMS
         detections = self._postprocess(output, scale, dx, dy, img_h, img_w)
+        elapsed = time.monotonic() - t0
+        logger.info(
+            "YOLO detect: %d vehicles in %.2fs (camera=%s frame=%dx%d input=%d)",
+            len(detections), elapsed, camera_label, img_w, img_h, YOLO_INPUT_SIZE,
+        )
         return detections
 
     def _postprocess(

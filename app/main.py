@@ -197,7 +197,7 @@ async def lifespan(app: FastAPI):
                 for s in cam.slots if s.polygon_coords
             ]
             if slots:
-                detection_loop.add_camera(cam.id, cam.source, slots, cam.camera_type)
+                detection_loop.add_camera(cam.id, cam.source, slots, cam.camera_type, cam.label)
 
                 # Load calibrations
                 from app.models.calibration import Calibration

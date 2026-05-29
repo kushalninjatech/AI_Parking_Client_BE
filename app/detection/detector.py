@@ -87,9 +87,9 @@ class ParkingDetector:
         )
         return pickle.dumps(data)
 
-    def detect_frame(self, frame: np.ndarray, slots: List[Dict]) -> List[Dict]:
+    def detect_frame(self, frame: np.ndarray, slots: List[Dict], camera_label: str = "") -> List[Dict]:
         """Detect all slot states from a single frame."""
-        vehicle_detections = self._yolo.detect(frame)
+        vehicle_detections = self._yolo.detect(frame, camera_label=camera_label)
         logger.debug("YOLO: %d detections", len(vehicle_detections))
 
         depth_map = self._depth.estimate(frame)
