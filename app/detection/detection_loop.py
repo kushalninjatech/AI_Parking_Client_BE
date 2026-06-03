@@ -109,9 +109,13 @@ class DetectionLoop:
             debug_frame = self._detector.generate_debug_frame(
                 frame, self._detector._last_detections, slot_dicts, results
             )
-            upload_debug_frame(debug_frame, settings.DEVICE_ID, camera_label)
+            url = upload_debug_frame(debug_frame, settings.DEVICE_ID, camera_label)
+            if url:
+                logger.info("Debug frame uploaded: %s", url)
+            else:
+                logger.warning("Debug frame upload returned None")
         except Exception:
-            logger.debug("Debug frame upload failed (non-critical)")
+            logger.exception("Debug frame upload failed")
         return results
 
     # ------------------------------------------------------------------
