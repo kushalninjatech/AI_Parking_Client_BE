@@ -26,6 +26,7 @@ class DetectionLoop:
         self._running = False
         self._slot_states: Dict[int, SlotState] = {}
         self._slot_vehicle_types: Dict[int, Optional[VehicleType]] = {}
+        self._slot_occupied: Dict[int, Tuple[int, int]] = {}  # slot_id → (car, 2w)
         self._on_state_change = None
         self._on_frame_captured = None
         self._last_detection_time: Dict[int, float] = {}  # camera_id → last full-detection time
@@ -126,7 +127,9 @@ class DetectionLoop:
 
         slot_dicts = [
             {"id": s["id"], "label": s["label"], "polygon_coords": s["polygon_coords"],
-             "slot_type": s.get("slot_type", "GENERAL")}
+             "slot_type": s.get("slot_type", "GENERAL"),
+             "capacity_car": s.get("capacity_car", 0),
+             "capacity_two_wheeler": s.get("capacity_two_wheeler", 0)}
             for s in slots if s.get("polygon_coords")
         ]
         if not slot_dicts:
@@ -143,10 +146,16 @@ class DetectionLoop:
             slot_id = r["id"]
             new_state = r["state"]
             new_vtype = r.get("detected_vehicle_type")
+            new_occ_car = r.get("occupied_car", 0)
+            new_occ_2w = r.get("occupied_two_wheeler", 0)
             old_state = self._slot_states.get(slot_id)
             old_vtype = self._slot_vehicle_types.get(slot_id)
+            old_occ = self._slot_occupied.get(slot_id, (0, 0))
 
-            if old_state == new_state and old_vtype == new_vtype:
+            new_fingerprint = (new_state, new_vtype, new_occ_car, new_occ_2w)
+            old_fingerprint = (old_state, old_vtype, old_occ[0], old_occ[1])
+
+            if new_fingerprint == old_fingerprint:
                 # No change — reset debounce counter
                 self._debounce_counters.pop(slot_id, None)
                 self._debounce_pending.pop(slot_id, None)
@@ -156,20 +165,22 @@ class DetectionLoop:
                 # Debounce disabled — report immediately
                 self._slot_states[slot_id] = new_state
                 self._slot_vehicle_types[slot_id] = new_vtype
+                self._slot_occupied[slot_id] = (new_occ_car, new_occ_2w)
                 changes.append(r)
                 logger.info(
-                    "Slot %s: %s(%s) → %s(%s) (conf=%.2f)",
-                    r["label"], old_state, old_vtype, new_state, new_vtype, r["confidence"],
+                    "Slot %s: %s(%s) → %s(%s) car=%d 2w=%d (conf=%.2f)",
+                    r["label"], old_state, old_vtype, new_state, new_vtype,
+                    new_occ_car, new_occ_2w, r["confidence"],
                 )
                 continue
 
             # Debounce: check if this is the same pending state
             pending = self._debounce_pending.get(slot_id)
-            if pending and pending == (new_state, new_vtype):
+            if pending and pending == new_fingerprint:
                 self._debounce_counters[slot_id] = self._debounce_counters.get(slot_id, 1) + 1
             else:
                 # New pending state — reset counter
-                self._debounce_pending[slot_id] = (new_state, new_vtype)
+                self._debounce_pending[slot_id] = new_fingerprint
                 self._debounce_counters[slot_id] = 1
 
             count = self._debounce_counters[slot_id]
@@ -177,13 +188,14 @@ class DetectionLoop:
                 # Confirmed — report the change
                 self._slot_states[slot_id] = new_state
                 self._slot_vehicle_types[slot_id] = new_vtype
+                self._slot_occupied[slot_id] = (new_occ_car, new_occ_2w)
                 self._debounce_counters.pop(slot_id, None)
                 self._debounce_pending.pop(slot_id, None)
                 changes.append(r)
                 logger.info(
-                    "Slot %s: %s(%s) → %s(%s) (conf=%.2f, debounce=%d/%d)",
+                    "Slot %s: %s(%s) → %s(%s) car=%d 2w=%d (conf=%.2f, debounce=%d/%d)",
                     r["label"], old_state, old_vtype, new_state, new_vtype,
-                    r["confidence"], count, debounce_threshold,
+                    new_occ_car, new_occ_2w, r["confidence"], count, debounce_threshold,
                 )
             else:
                 logger.debug(

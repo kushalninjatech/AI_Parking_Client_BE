@@ -343,7 +343,9 @@ def _handle_config_slots(client, command_id: str, payload: dict):
                 all_slots = db.query(ParkingSlot).filter(ParkingSlot.camera_id == cam.id).all()
                 slot_dicts = [
                     {"id": s.id, "label": s.label, "polygon_coords": s.polygon_coords,
-                     "slot_type": s.slot_type or "GENERAL"}
+                     "slot_type": s.slot_type or "GENERAL",
+                     "capacity_car": s.capacity_car or 0,
+                     "capacity_two_wheeler": s.capacity_two_wheeler or 0}
                     for s in all_slots
                 ]
                 detection_loop.add_camera(cam.id, cam.source, slot_dicts, cam.camera_type, cam.label)

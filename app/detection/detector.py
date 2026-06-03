@@ -106,9 +106,14 @@ class ParkingDetector:
             slot_type = SlotType(slot.get("slot_type", SlotType.GENERAL.value))
             base = {"id": slot["id"], "label": slot["label"], "slot_type": slot_type}
 
+            capacity_car = slot.get("capacity_car", 0)
+            capacity_two_wheeler = slot.get("capacity_two_wheeler", 0)
+            total_capacity = capacity_car + capacity_two_wheeler
+
             if not polygon:
                 results.append({**base, "state": SlotState.EMPTY, "confidence": 0.0,
-                                "detected_vehicle_type": None, "is_mismatched": False})
+                                "detected_vehicle_type": None, "is_mismatched": False,
+                                "occupied_car": 0, "occupied_two_wheeler": 0})
                 continue
 
             # Collect all vehicle detections whose centroids fall inside this polygon
@@ -131,13 +136,26 @@ class ParkingDetector:
                     if vtype:
                         matched_vehicles.append((vtype, det["confidence"]))
 
+            # Count per vehicle type
+            occupied_car = sum(1 for v, _ in matched_vehicles if v == VehicleType.CAR)
+            occupied_two_wheeler = sum(1 for v, _ in matched_vehicles if v == VehicleType.TWO_WHEELER)
+
             if matched_vehicles:
-                # Largest vehicle wins (highest priority)
+                # Best type for detected_vehicle_type (backward compat)
                 best_type, best_conf = max(matched_vehicles, key=lambda x: VEHICLE_PRIORITY.get(x[0], 0))
+                # Mismatch: vehicle type not allowed in this slot
                 is_mismatched = slot_type != SlotType.GENERAL and best_type.value != slot_type.value
                 self._obstruct_streak[slot["id"]] = 0
                 results.append({**base, "state": SlotState.VEHICLE, "confidence": best_conf,
-                                "detected_vehicle_type": best_type, "is_mismatched": is_mismatched})
+                                "detected_vehicle_type": best_type, "is_mismatched": is_mismatched,
+                                "occupied_car": occupied_car, "occupied_two_wheeler": occupied_two_wheeler})
+                continue
+
+            # Multi-vehicle slots (capacity > 1): skip obstruction detection
+            if total_capacity > 1:
+                results.append({**base, "state": SlotState.EMPTY, "confidence": 0.0,
+                                "detected_vehicle_type": None, "is_mismatched": False,
+                                "occupied_car": 0, "occupied_two_wheeler": 0})
                 continue
 
             if slot["id"] in self._calibrations:
@@ -150,10 +168,12 @@ class ParkingDetector:
                 confirmed = self._obstruct_streak.get(sid, 0) >= CONFIRM_FRAMES
                 state = SlotState.OBSTRUCTED if confirmed else SlotState.EMPTY
                 results.append({**base, "state": state, "confidence": confidence if confirmed else 0.0,
-                                "detected_vehicle_type": None, "is_mismatched": False})
+                                "detected_vehicle_type": None, "is_mismatched": False,
+                                "occupied_car": 0, "occupied_two_wheeler": 0})
             else:
                 results.append({**base, "state": SlotState.EMPTY, "confidence": 0.0,
-                                "detected_vehicle_type": None, "is_mismatched": False})
+                                "detected_vehicle_type": None, "is_mismatched": False,
+                                "occupied_car": 0, "occupied_two_wheeler": 0})
 
         return results
 

@@ -174,7 +174,9 @@ def _update_detection_loop(camera_id: int, db: Session) -> None:
     slots = db.query(ParkingSlot).filter(ParkingSlot.camera_id == camera_id).all()
     slot_dicts = [
         {"id": s.id, "label": s.label, "polygon_coords": s.polygon_coords,
-         "slot_type": s.slot_type or "GENERAL"}
+         "slot_type": s.slot_type or "GENERAL",
+         "capacity_car": s.capacity_car or 0,
+         "capacity_two_wheeler": s.capacity_two_wheeler or 0}
         for s in slots
     ]
     # add_camera registers new cameras AND updates existing ones

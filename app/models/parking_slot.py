@@ -13,6 +13,11 @@ class ParkingSlot(Base, TimestampMixin):
     state = Column(SAEnum(SlotState), nullable=False, default=SlotState.EMPTY)
     slot_type = Column(String(20), nullable=False, default=SlotType.GENERAL.value)
     detected_vehicle_type = Column(String(20), nullable=True)
+    # Per-type capacity and occupied counts
+    capacity_car = Column(Integer, nullable=False, default=0)
+    capacity_two_wheeler = Column(Integer, nullable=False, default=0)
+    occupied_car = Column(Integer, nullable=False, default=0)
+    occupied_two_wheeler = Column(Integer, nullable=False, default=0)
 
     # Polygon ROI coordinates (JSON: [[x1,y1],[x2,y2],[x3,y3],[x4,y4]])
     polygon_coords = Column(Text, nullable=True)

@@ -68,6 +68,8 @@ def on_state_change(camera_id: int, all_results, changes, frame):
                 slot.state = r["state"]
                 vtype = r.get("detected_vehicle_type")
                 slot.detected_vehicle_type = vtype.value if hasattr(vtype, "value") else vtype
+                slot.occupied_car = r.get("occupied_car", 0)
+                slot.occupied_two_wheeler = r.get("occupied_two_wheeler", 0)
         db.commit()
     finally:
         db.close()
@@ -138,7 +140,9 @@ async def snapshot_loop():
                         cam.label,
                         [{"label": s.label, "state": s.state,
                           "slot_type": s.slot_type or "GENERAL",
-                          "detected_vehicle_type": s.detected_vehicle_type}
+                          "detected_vehicle_type": s.detected_vehicle_type,
+                          "occupied_car": s.occupied_car or 0,
+                          "occupied_two_wheeler": s.occupied_two_wheeler or 0}
                          for s in slots],
                     )
                 logger.debug("Snapshot published for %d cameras", len(cameras))
@@ -165,6 +169,21 @@ async def lifespan(app: FastAPI):
             conn.execute(text("ALTER TABLE parking_slots ADD COLUMN slot_type VARCHAR(20) DEFAULT 'GENERAL' NOT NULL"))
         if "detected_vehicle_type" not in cols:
             conn.execute(text("ALTER TABLE parking_slots ADD COLUMN detected_vehicle_type VARCHAR(20)"))
+        if "capacity_car" not in cols:
+            conn.execute(text("ALTER TABLE parking_slots ADD COLUMN capacity_car INTEGER DEFAULT 0 NOT NULL"))
+        if "capacity_two_wheeler" not in cols:
+            conn.execute(text("ALTER TABLE parking_slots ADD COLUMN capacity_two_wheeler INTEGER DEFAULT 0 NOT NULL"))
+        if "occupied_car" not in cols:
+            conn.execute(text("ALTER TABLE parking_slots ADD COLUMN occupied_car INTEGER DEFAULT 0 NOT NULL"))
+        if "occupied_two_wheeler" not in cols:
+            conn.execute(text("ALTER TABLE parking_slots ADD COLUMN occupied_two_wheeler INTEGER DEFAULT 0 NOT NULL"))
+        conn.commit()
+
+    # Backfill capacity for existing single-vehicle slots
+    with engine.connect() as conn:
+        conn.execute(text("UPDATE parking_slots SET capacity_car = 1 WHERE slot_type = 'CAR' AND capacity_car = 0"))
+        conn.execute(text("UPDATE parking_slots SET capacity_two_wheeler = 1 WHERE slot_type = 'TWO_WHEELER' AND capacity_two_wheeler = 0"))
+        conn.execute(text("UPDATE parking_slots SET capacity_car = 1 WHERE slot_type = 'GENERAL' AND capacity_car = 0"))
         conn.commit()
 
     # Load models (graceful — server starts even if models missing)
@@ -193,7 +212,9 @@ async def lifespan(app: FastAPI):
         for cam in cameras:
             slots = [
                 {"id": s.id, "label": s.label, "polygon_coords": s.polygon_coords,
-                 "slot_type": s.slot_type or "GENERAL"}
+                 "slot_type": s.slot_type or "GENERAL",
+                 "capacity_car": s.capacity_car or 0,
+                 "capacity_two_wheeler": s.capacity_two_wheeler or 0}
                 for s in cam.slots if s.polygon_coords
             ]
             if slots:

@@ -109,6 +109,8 @@ class MQTTPublisher:
                     "detected_vehicle_type": s["detected_vehicle_type"].value if isinstance(s.get("detected_vehicle_type"), VehicleType) else s.get("detected_vehicle_type"),
                     "is_mismatched": s.get("is_mismatched", False),
                     "image_url": s.get("image_url"),
+                    "occupied_car": s.get("occupied_car", 0),
+                    "occupied_two_wheeler": s.get("occupied_two_wheeler", 0),
                 }
                 for s in changes
             ],
@@ -132,6 +134,8 @@ class MQTTPublisher:
                     "state": s["state"].value if isinstance(s["state"], SlotState) else s["state"],
                     "slot_type": s.get("slot_type", "GENERAL"),
                     "detected_vehicle_type": s.get("detected_vehicle_type"),
+                    "occupied_car": s.get("occupied_car", 0),
+                    "occupied_two_wheeler": s.get("occupied_two_wheeler", 0),
                 }
                 for s in slots
             ],
