@@ -38,6 +38,7 @@ class ParkingDetector:
         self._yolo = yolo
         self._depth = depth
         self._calibrations: Dict[int, Dict] = {}
+        self._last_detections: List[Dict] = []
         self._obstruct_streak: Dict[int, int] = {}
 
     def set_calibration(self, slot_id: int, calibration_data: bytes) -> None:
@@ -88,9 +89,48 @@ class ParkingDetector:
         )
         return pickle.dumps(data)
 
+    def generate_debug_frame(self, frame: np.ndarray, vehicle_detections: List[Dict], slots: List[Dict], results: List[Dict]) -> np.ndarray:
+        """Draw YOLO bboxes + slot polygons on frame for debugging."""
+        debug = frame.copy()
+        # Draw all vehicle bboxes in red
+        for det in vehicle_detections:
+            x1, y1, x2, y2 = det["bbox"]
+            cx, cy = det["centroid"]
+            cls = det["class_id"]
+            conf = det["confidence"]
+            color = (0, 0, 255) if cls == 2 else (255, 100, 0)  # red=car, orange=2w
+            cv2.rectangle(debug, (x1, y1), (x2, y2), color, 2)
+            cv2.circle(debug, (cx, cy), 5, color, -1)
+            label = f"{'CAR' if cls == 2 else '2W'} {conf:.0%}"
+            cv2.putText(debug, label, (x1, y1 - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+        # Draw slot polygons with state colors
+        for slot, res in zip(slots, results):
+            polygon = slot["polygon_coords"]
+            if isinstance(polygon, str):
+                polygon = json.loads(polygon)
+            if not polygon:
+                continue
+            pts = np.array(polygon, dtype=np.int32)
+            state = res.get("state", "EMPTY")
+            sc = (0, 255, 0) if state == "EMPTY" else (0, 0, 255) if state == "VEHICLE" else (0, 165, 255)
+            cv2.polylines(debug, [pts], True, sc, 3)
+            cx_p, cy_p = int(pts[:, 0].mean()), int(pts[:, 1].mean())
+            vtype = res.get("detected_vehicle_type")
+            vtype_str = vtype.value if hasattr(vtype, "value") else (vtype or "")
+            text = f"{slot['label']}: {state}"
+            if vtype_str:
+                text += f" ({vtype_str})"
+            occ_c = res.get("occupied_car", 0)
+            occ_2w = res.get("occupied_two_wheeler", 0)
+            if occ_c or occ_2w:
+                text += f" C:{occ_c} 2W:{occ_2w}"
+            cv2.putText(debug, text, (cx_p - 60, cy_p), cv2.FONT_HERSHEY_SIMPLEX, 0.6, sc, 2)
+        return debug
+
     def detect_frame(self, frame: np.ndarray, slots: List[Dict], camera_label: str = "") -> List[Dict]:
         """Detect all slot states from a single frame."""
         vehicle_detections = self._yolo.detect(frame, camera_label=camera_label)
+        self._last_detections = vehicle_detections
         logger.debug("YOLO: %d detections", len(vehicle_detections))
 
         depth_map = self._depth.estimate(frame)

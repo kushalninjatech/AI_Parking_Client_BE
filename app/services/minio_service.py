@@ -85,3 +85,39 @@ def upload_slot_image(
     except Exception:
         logger.exception("Failed to upload slot image for %s", slot_label)
         return None
+
+
+def upload_debug_frame(
+    frame: np.ndarray,
+    device_id: str,
+    camera_label: str,
+) -> Optional[str]:
+    """Upload annotated detection frame to MinIO. Overwrites previous frame."""
+    client = get_minio_client()
+    if client is None:
+        return None
+
+    try:
+        ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+        if not ok:
+            return None
+
+        data = buf.tobytes()
+        object_name = f"debug/{device_id}/{camera_label}/latest.jpg"
+
+        client.put_object(
+            settings.MINIO_BUCKET,
+            object_name,
+            io.BytesIO(data),
+            len(data),
+            content_type="image/jpeg",
+        )
+
+        scheme = "https" if settings.MINIO_SECURE else "http"
+        url = f"{scheme}://{settings.MINIO_ENDPOINT}/{settings.MINIO_BUCKET}/{object_name}"
+        logger.debug("Debug frame uploaded: %s", url)
+        return url
+
+    except Exception:
+        logger.debug("Failed to upload debug frame")
+        return None

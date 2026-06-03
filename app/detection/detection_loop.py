@@ -102,7 +102,17 @@ class DetectionLoop:
 
     def _run_detection(self, frame: np.ndarray, slot_dicts: List[Dict], camera_label: str = "") -> List[Dict]:
         """Run YOLO + depth inference. Runs in a thread."""
-        return self._detector.detect_frame(frame, slot_dicts, camera_label=camera_label)
+        results = self._detector.detect_frame(frame, slot_dicts, camera_label=camera_label)
+        # Upload annotated debug frame to MinIO
+        try:
+            from app.services.minio_service import upload_debug_frame
+            debug_frame = self._detector.generate_debug_frame(
+                frame, self._detector._last_detections, slot_dicts, results
+            )
+            upload_debug_frame(debug_frame, settings.DEVICE_ID, camera_label)
+        except Exception:
+            logger.debug("Debug frame upload failed (non-critical)")
+        return results
 
     # ------------------------------------------------------------------
 
