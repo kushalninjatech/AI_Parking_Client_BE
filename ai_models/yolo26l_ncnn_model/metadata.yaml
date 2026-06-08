@@ -1,6 +1,6 @@
 description: Ultralytics YOLO26l model trained on /home/lq/codes/ultralytics/ultralytics/cfg/datasets/coco.yaml
 author: Ultralytics
-date: '2026-05-29T07:52:01.307900'
+date: '2026-05-29T14:24:48.908973'
 version: 8.4.56
 license: AGPL-3.0 License (https://ultralytics.com/license)
 docs: https://docs.ultralytics.com
@@ -8,8 +8,8 @@ stride: 32
 task: detect
 batch: 1
 imgsz:
-- 640
-- 640
+- 2048
+- 2048
 names:
   0: person
   1: bicycle
