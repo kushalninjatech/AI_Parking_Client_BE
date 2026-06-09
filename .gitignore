@@ -60,6 +60,3 @@ data/debug/
 # mypy / ruff
 .mypy_cache/
 .ruff_cache/
-
-
-scripts/

@@ -305,14 +305,16 @@ class MQTTPublisher:
         self._connected = False
         rc = reason_code.value if hasattr(reason_code, "value") else int(reason_code)
 
-        if rc == 0:
+        if rc == 142:
+            # Session taken over by a newer instance with the same client_id.
+            # Do NOT reconnect — the other instance is the intended one.
             logger.warning(
-                "MQTT session closed by broker (session taken over by a newer instance). "
+                "MQTT session taken over (rc=142) by a newer instance. "
                 "This instance will not reconnect."
             )
             return
 
-        logger.warning("MQTT disconnected: %s — will reconnect with backoff", reason_code)
+        logger.warning("MQTT disconnected: rc=%d (%s) — will reconnect with backoff", rc, reason_code)
         if not self._shutdown:
             threading.Thread(target=self._reconnect_loop, daemon=True).start()
 
