@@ -307,6 +307,8 @@ def _handle_config_slots(client, command_id: str, payload: dict):
                             pass
 
                     slot_type = slot_data.get("slot_type", "GENERAL")
+                    capacity_car = slot_data.get("capacity_car", 0)
+                    capacity_two_wheeler = slot_data.get("capacity_two_wheeler", 0)
 
                     existing = db.query(ParkingSlot).filter(
                         ParkingSlot.camera_id == cam.id, ParkingSlot.label == label
@@ -315,6 +317,8 @@ def _handle_config_slots(client, command_id: str, payload: dict):
                     if existing:
                         existing.polygon_coords = polygon_coords
                         existing.slot_type = slot_type
+                        existing.capacity_car = capacity_car
+                        existing.capacity_two_wheeler = capacity_two_wheeler
                         existing.pos_x1 = pos_x1
                         existing.pos_y1 = pos_y1
                         existing.pos_x2 = pos_x2
@@ -325,6 +329,8 @@ def _handle_config_slots(client, command_id: str, payload: dict):
                             camera_id=cam.id,
                             state=SlotState.EMPTY,
                             slot_type=slot_type,
+                            capacity_car=capacity_car,
+                            capacity_two_wheeler=capacity_two_wheeler,
                             polygon_coords=polygon_coords,
                             pos_x1=pos_x1, pos_y1=pos_y1,
                             pos_x2=pos_x2, pos_y2=pos_y2,
