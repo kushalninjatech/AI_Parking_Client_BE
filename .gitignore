@@ -47,6 +47,19 @@ logs/
 docker-compose.override.yml
 
 
+# Model weights
+*.pt
+*.onnx
+*.ncnn.bin
+*.ncnn.param
+ai_models/
+
+# Debug output
+data/debug/
+
 # mypy / ruff
 .mypy_cache/
 .ruff_cache/
+
+
+scripts/

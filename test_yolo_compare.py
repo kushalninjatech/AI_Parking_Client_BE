@@ -38,12 +38,24 @@ COLORS = {
 }
 
 # Models to compare
-DEFAULT_MODELS = ["yolo11n", "yolo11l", "yolo11x"]
+DEFAULT_MODELS = [
+    "yolo11n", "yolo11s", "yolo11m", "yolo11l", "yolo11x",
+    "yolo26n", "yolo26s", "yolo26m", "yolo26l", "yolo26x",
+]
+
+# NCNN model paths (local directories) — detected by "/" in the name
+# For NCNN models, ultralytics loads from the directory directly
 
 
 def run_model(model_name, frame, input_size, conf):
     """Run a YOLO model and return detections + timing."""
-    model = YOLO(f"{model_name}.pt")
+    # Support both .pt names and direct paths (NCNN dirs, .onnx files)
+    if os.path.exists(model_name):
+        model = YOLO(model_name)
+    elif os.path.exists(f"{model_name}.pt"):
+        model = YOLO(f"{model_name}.pt")
+    else:
+        model = YOLO(f"{model_name}.pt")
 
     t0 = time.monotonic()
     results = model(frame, imgsz=input_size, conf=conf, verbose=False)[0]
@@ -92,7 +104,7 @@ def main():
     parser.add_argument("--image", type=str, required=True, help="Input image path")
     parser.add_argument("--models", type=str, default=",".join(DEFAULT_MODELS),
                         help="Comma-separated model names (e.g. yolo11n,yolo11l,yolo11x)")
-    parser.add_argument("--sizes", type=str, default="2048",
+    parser.add_argument("--sizes", type=str, default="640,2048",
                         help="Comma-separated input sizes (e.g. 640,1280,2048)")
     parser.add_argument("--conf", type=float, default=0.15, help="Confidence threshold")
     args = parser.parse_args()
@@ -138,14 +150,15 @@ def main():
             print(f"\n  Summary: {len(top_half)} top + {len(bottom_half)} bottom = {len(detections)} total")
 
             # Save individual output
-            title = f"{model_name} @ {input_size} | {len(detections)} det | {elapsed:.2f}s"
+            display_name = os.path.basename(model_name.rstrip("/"))
+            title = f"{display_name} @ {input_size} | {len(detections)} det | {elapsed:.2f}s"
             output = draw_result(frame, detections, title)
-            out_path = f"data/debug/compare_{model_name}_{input_size}.jpg"
+            out_path = f"data/debug/compare_{display_name}_{input_size}.jpg"
             cv2.imwrite(out_path, output)
             print(f"  Saved: {out_path}")
 
             all_outputs.append({
-                "model": model_name,
+                "model": display_name,
                 "size": input_size,
                 "total": len(detections),
                 "top": len(top_half),

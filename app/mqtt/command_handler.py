@@ -184,7 +184,7 @@ def _handle_restart(client, command_id: str, payload: dict):
         import subprocess
         time.sleep(1)  # let ACK publish
         try:
-            subprocess.Popen(["sudo", "systemctl", "restart", "ai-parking-client"])
+            subprocess.Popen(["sudo", "systemctl", "restart", "ai-parking-be"])
             _publish_ack(client, command_id, "restart", "completed")
         except Exception as e:
             _publish_ack(client, command_id, "restart", "failed", error=str(e))
@@ -428,9 +428,153 @@ def _handle_calibrate(client, command_id: str, payload: dict):
     threading.Thread(target=_do, daemon=True).start()
 
 
+def _run_script(script_name: str, args: list = None) -> tuple:
+    """Run a script from the scripts/ directory. Returns (success, result_dict)."""
+    import subprocess
+    import pathlib
+
+    script_path = pathlib.Path(settings.GIT_REPO_DIR) / "scripts" / script_name
+    cmd = [str(script_path)] + (args or [])
+
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+
+    if result.returncode != 0:
+        error = result.stderr.strip()
+        try:
+            err_data = json.loads(error)
+            error = err_data.get("error", error)
+        except (json.JSONDecodeError, AttributeError):
+            pass
+        return False, {"error": error or f"{script_name} failed"}
+
+    try:
+        return True, json.loads(result.stdout.strip())
+    except json.JSONDecodeError:
+        return True, {"output": result.stdout.strip()}
+
+
+def _handle_update(client, command_id: str, payload: dict):
+    """Run scripts/update.sh → publish result → restart service."""
+    _publish_ack(client, command_id, "update", "acknowledged")
+
+    def _do():
+        import subprocess
+        import time
+
+        try:
+            cmd_payload = payload.get("payload") or {}
+            branch = cmd_payload.get("branch", settings.GIT_BRANCH)
+            commit = cmd_payload.get("commit", "")
+
+            args = [branch]
+            if commit:
+                args.append(commit)
+
+            ok, result_data = _run_script("update.sh", args)
+
+            if not ok:
+                _publish_ack(client, command_id, "update", "failed", error=result_data.get("error"))
+                return
+
+            result_topic = f"parking/{settings.DEVICE_ID}/cmd/result"
+            result_data.update({
+                "device_id": settings.DEVICE_ID,
+                "command_id": command_id,
+                "action": "update",
+                "timestamp": time.time(),
+            })
+            client.publish(result_topic, json.dumps(result_data), qos=1)
+            _publish_ack(client, command_id, "update", "completed")
+
+            # Restart service after ACK is sent
+            time.sleep(1)
+            subprocess.Popen(["sudo", "systemctl", "restart", "ai-parking-be"])
+
+        except Exception as e:
+            logger.exception("Update command failed")
+            _publish_ack(client, command_id, "update", "failed", error=str(e))
+
+    threading.Thread(target=_do, daemon=True).start()
+
+
+def _handle_rollback(client, command_id: str, payload: dict):
+    """Run scripts/rollback.sh → publish result → restart service."""
+    _publish_ack(client, command_id, "rollback", "acknowledged")
+
+    def _do():
+        import subprocess
+        import time
+
+        try:
+            cmd_payload = payload.get("payload") or {}
+            target_commit = cmd_payload.get("commit", "")
+
+            args = [target_commit] if target_commit else []
+
+            ok, result_data = _run_script("rollback.sh", args)
+
+            if not ok:
+                _publish_ack(client, command_id, "rollback", "failed", error=result_data.get("error"))
+                return
+
+            result_topic = f"parking/{settings.DEVICE_ID}/cmd/result"
+            result_data.update({
+                "device_id": settings.DEVICE_ID,
+                "command_id": command_id,
+                "action": "rollback",
+                "timestamp": time.time(),
+            })
+            client.publish(result_topic, json.dumps(result_data), qos=1)
+            _publish_ack(client, command_id, "rollback", "completed")
+
+            # Restart service after ACK is sent
+            time.sleep(1)
+            subprocess.Popen(["sudo", "systemctl", "restart", "ai-parking-be"])
+
+        except Exception as e:
+            logger.exception("Rollback command failed")
+            _publish_ack(client, command_id, "rollback", "failed", error=str(e))
+
+    threading.Thread(target=_do, daemon=True).start()
+
+
+def _handle_version(client, command_id: str, payload: dict):
+    """Run scripts/version.sh → publish result."""
+    _publish_ack(client, command_id, "version", "acknowledged")
+
+    def _do():
+        import time
+
+        try:
+            ok, result_data = _run_script("version.sh")
+
+            if not ok:
+                _publish_ack(client, command_id, "version", "failed", error=result_data.get("error"))
+                return
+
+            result_topic = f"parking/{settings.DEVICE_ID}/cmd/result"
+            result_data.update({
+                "device_id": settings.DEVICE_ID,
+                "command_id": command_id,
+                "action": "version",
+                "timestamp": time.time(),
+            })
+            client.publish(result_topic, json.dumps(result_data), qos=1)
+            _publish_ack(client, command_id, "version", "completed")
+
+        except Exception as e:
+            logger.exception("Version command failed")
+            _publish_ack(client, command_id, "version", "failed", error=str(e))
+
+    threading.Thread(target=_do, daemon=True).start()
+
+
 _HANDLERS = {
     "snapshot": _handle_snapshot,
     "restart": _handle_restart,
+    "update": _handle_update,
+    "rollback": _handle_rollback,
+    "version": _handle_version,
     "config": _handle_config,
     "config/camera": _handle_config_camera,
     "config/slots": _handle_config_slots,

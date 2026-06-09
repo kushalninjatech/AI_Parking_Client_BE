@@ -21,8 +21,8 @@ class Settings(BaseSettings):
     DETECTION_INTERVAL: int = 30
     DETECTION_DEBOUNCE_ENABLED: bool = True
     DETECTION_DEBOUNCE_COUNT: int = 3  # consecutive same-state detections before reporting change
-    YOLO_MODEL_PATH: str = "ai_models/yolo26l_ncnn_model"
-    YOLO_INPUT_SIZE: int = 2048
+    YOLO_MODEL_PATH: str = "ai_models/yolo11x.pt"
+    YOLO_INPUT_SIZE: int = 640
     YOLO_CONFIDENCE: float = 0.15
     SLOT_OVERLAP_THRESHOLD: float = 0.3  # vehicle bbox must cover 30% of slot polygon to match
     DEPTH_MODEL_PATH: str = "models/onnx/model_quantized.onnx"
@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     MINIO_SECRET_KEY: str = ""
     MINIO_SECURE: bool = True
     MINIO_BUCKET: str = "ai-parking"
+
+    # Git (for OTA updates)
+    GIT_REPO_DIR: str = "."  # path to the git repo root
+    GIT_REMOTE: str = "origin"
+    GIT_BRANCH: str = "dev"
 
     # Server
     APP_HOST: str = "0.0.0.0"

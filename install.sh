@@ -44,6 +44,9 @@ echo ">> uv          = ${UV_BIN}"
 echo ">> uv sync (idempotent)"
 sudo -u "${RUN_USER}" "${UV_BIN}" sync --project "${INSTALL_DIR}"
 
+echo ">> making OTA scripts executable"
+chmod +x "${INSTALL_DIR}/scripts/"*.sh 2>/dev/null || true
+
 render() {
     local src="$1" dst="$2"
     sed \
