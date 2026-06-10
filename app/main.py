@@ -38,7 +38,7 @@ mqtt_publisher = MQTTPublisher(db_factory=SessionLocal)
 latest_frames = {}
 
 
-def on_state_change(camera_id: int, all_results, changes, frame):
+def on_state_change(camera_id: int, all_results, changes, frame, vehicle_events=None):
     """Called when detection loop produces results."""
     import json
     from app.db.session import SessionLocal
@@ -86,9 +86,21 @@ def on_state_change(camera_id: int, all_results, changes, frame):
                     change["image_url"] = url
 
     # Publish only changed slots to MQTT events topic.
-    # Full-state snapshots handled by snapshot_loop on timer (MQTT_SNAPSHOT_INTERVAL).
     if changes:
         mqtt_publisher.publish_slot_events(camera_label, changes)
+
+    # Publish vehicle entry/exit events (multi-capacity zones)
+    if vehicle_events and frame is not None:
+        from app.services.minio_service import upload_vehicle_crop
+        for evt in vehicle_events:
+            bbox = evt.get("bbox")
+            if bbox:
+                url = upload_vehicle_crop(
+                    frame, bbox, settings.DEVICE_ID, camera_label, evt["track_id"],
+                )
+                if url:
+                    evt["image_url"] = url
+        mqtt_publisher.publish_vehicle_events(camera_label, vehicle_events)
 
 
 def on_frame_captured(camera_id: int, frame):

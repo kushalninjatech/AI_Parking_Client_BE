@@ -11,6 +11,7 @@ from app.core.config import settings
 from app.core.constants import COCO_VEHICLE_MAP, VEHICLE_PRIORITY, SlotState, SlotType, VehicleType
 from app.detection.yolo_detector import YOLODetector
 from app.detection.depth_estimator import DepthEstimator
+from app.detection.vehicle_tracker import VehicleTracker
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +41,8 @@ class ParkingDetector:
         self._calibrations: Dict[int, Dict] = {}
         self._last_detections: List[Dict] = []
         self._obstruct_streak: Dict[int, int] = {}
+        self._trackers: Dict[int, VehicleTracker] = {}  # slot_id → VehicleTracker
+        self._last_vehicle_events: List[Dict] = []  # entry/exit events from last frame
 
     def set_calibration(self, slot_id: int, calibration_data: bytes) -> None:
         import pickle
@@ -131,10 +134,12 @@ class ParkingDetector:
         """Detect all slot states from a single frame."""
         vehicle_detections = self._yolo.detect(frame, camera_label=camera_label)
         self._last_detections = vehicle_detections
+        self._last_vehicle_events = []
         logger.debug("YOLO: %d detections", len(vehicle_detections))
 
         depth_map = self._depth.estimate(frame)
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY).astype(np.float32)
+        img_h, img_w = frame.shape[:2]
 
         results = []
         for slot in slots:
@@ -164,40 +169,37 @@ class ParkingDetector:
                 "Slot %s: polygon=(%d,%d)-(%d,%d), %d vehicles to check",
                 slot["label"], px_min, py_min, px_max, py_max, len(vehicle_detections),
             )
-            matched_vehicles = []
+
+            matched_detections = []
             for det in vehicle_detections:
                 cx, cy = det["centroid"]
                 if cv2.pointPolygonTest(polygon_np, (float(cx), float(cy)), False) >= 0:
                     vtype = COCO_VEHICLE_MAP.get(det["class_id"])
-                    logger.info(
-                        "Slot %s: matched class_id=%d (%s) conf=%.2f centroid=(%d,%d)",
-                        slot["label"], det["class_id"], vtype, det["confidence"], cx, cy,
-                    )
                     if vtype:
-                        matched_vehicles.append((vtype, det["confidence"]))
+                        matched_detections.append({**det, "vehicle_type": vtype})
 
-            # Count per vehicle type
-            occupied_car = sum(1 for v, _ in matched_vehicles if v == VehicleType.CAR)
-            occupied_two_wheeler = sum(1 for v, _ in matched_vehicles if v == VehicleType.TWO_WHEELER)
+            # ── Multi-capacity zone → vehicle tracker ──
+            if total_capacity > 1:
+                result = self._detect_multi_capacity(
+                    slot, base, matched_detections, (img_h, img_w),
+                )
+                results.append(result)
+                continue
+
+            # ── Single-capacity slot → slot-level detection ──
+            matched_vehicles = [(d["vehicle_type"], d["confidence"]) for d in matched_detections]
 
             if matched_vehicles:
-                # Best type for detected_vehicle_type (backward compat)
                 best_type, best_conf = max(matched_vehicles, key=lambda x: VEHICLE_PRIORITY.get(x[0], 0))
-                # Mismatch: vehicle type not allowed in this slot
                 is_mismatched = slot_type != SlotType.GENERAL and best_type.value != slot_type.value
                 self._obstruct_streak[slot["id"]] = 0
                 results.append({**base, "state": SlotState.VEHICLE, "confidence": best_conf,
                                 "detected_vehicle_type": best_type, "is_mismatched": is_mismatched,
-                                "occupied_car": occupied_car, "occupied_two_wheeler": occupied_two_wheeler})
+                                "occupied_car": sum(1 for v, _ in matched_vehicles if v == VehicleType.CAR),
+                                "occupied_two_wheeler": sum(1 for v, _ in matched_vehicles if v == VehicleType.TWO_WHEELER)})
                 continue
 
-            # Multi-vehicle slots (capacity > 1): skip obstruction detection
-            if total_capacity > 1:
-                results.append({**base, "state": SlotState.EMPTY, "confidence": 0.0,
-                                "detected_vehicle_type": None, "is_mismatched": False,
-                                "occupied_car": 0, "occupied_two_wheeler": 0})
-                continue
-
+            # Anomaly/depth fallback for single-capacity slots
             if slot["id"] in self._calibrations:
                 is_obstructed, confidence = self._check_anomaly(gray, depth_map, polygon, slot["id"])
                 sid = slot["id"]
@@ -216,6 +218,66 @@ class ParkingDetector:
                                 "occupied_car": 0, "occupied_two_wheeler": 0})
 
         return results
+
+    def _detect_multi_capacity(
+        self, slot: Dict, base: Dict, matched_detections: List[Dict],
+        frame_shape: Tuple[int, int],
+    ) -> Dict:
+        """Use VehicleTracker for multi-capacity zones."""
+        slot_id = slot["id"]
+
+        # Lazy-init tracker per slot
+        if slot_id not in self._trackers:
+            self._trackers[slot_id] = VehicleTracker(slot_id, slot["label"])
+
+        tracker = self._trackers[slot_id]
+        tracker_result = tracker.update(matched_detections, frame_shape)
+
+        # Collect entry/exit events for MQTT publishing
+        for tv in tracker_result["entered"]:
+            self._last_vehicle_events.append({
+                "event_type": "ENTERED",
+                "slot_label": slot["label"],
+                "slot_id": slot_id,
+                "vehicle_type": tv.vehicle_type.value,
+                "track_id": tv.track_id,
+                "confidence": tv.confidence,
+                "centroid": list(tv.centroid),
+                "bbox": tv.bbox,
+            })
+        for tv in tracker_result["exited"]:
+            self._last_vehicle_events.append({
+                "event_type": "EXITED",
+                "slot_label": slot["label"],
+                "slot_id": slot_id,
+                "vehicle_type": tv.vehicle_type.value,
+                "track_id": tv.track_id,
+                "duration_seconds": round(tv.last_seen - tv.first_seen),
+                "centroid": list(tv.centroid),
+                "bbox": tv.bbox,
+            })
+
+        occ_car = tracker_result["occupied_car"]
+        occ_2w = tracker_result["occupied_two_wheeler"]
+        total_occ = occ_car + occ_2w
+
+        state = SlotState.VEHICLE if total_occ > 0 else SlotState.EMPTY
+        best_conf = max((d["confidence"] for d in matched_detections), default=0.0)
+        best_type = None
+        if matched_detections:
+            best_det = max(matched_detections, key=lambda d: VEHICLE_PRIORITY.get(d["vehicle_type"], 0))
+            best_type = best_det["vehicle_type"]
+
+        return {
+            **base, "state": state, "confidence": best_conf,
+            "detected_vehicle_type": best_type, "is_mismatched": False,
+            "occupied_car": occ_car, "occupied_two_wheeler": occ_2w,
+        }
+
+    @property
+    def last_vehicle_events(self) -> List[Dict]:
+        """Entry/exit events from the last detect_frame call."""
+        return self._last_vehicle_events
 
     def _check_anomaly(
         self,

@@ -121,3 +121,49 @@ def upload_debug_frame(
     except Exception:
         logger.debug("Failed to upload debug frame")
         return None
+
+
+def upload_vehicle_crop(
+    frame: np.ndarray,
+    bbox: list,
+    device_id: str,
+    camera_label: str,
+    track_id: str,
+) -> Optional[str]:
+    """Crop vehicle bbox from frame and upload to MinIO."""
+    client = get_minio_client()
+    if client is None:
+        return None
+
+    try:
+        x1, y1, x2, y2 = bbox
+        h, w = frame.shape[:2]
+        pad = 20
+        x1, y1 = max(0, x1 - pad), max(0, y1 - pad)
+        x2, y2 = min(w, x2 + pad), min(h, y2 + pad)
+        if x2 <= x1 or y2 <= y1:
+            return None
+
+        cropped = frame[y1:y2, x1:x2]
+        ok, buf = cv2.imencode(".jpg", cropped, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        if not ok:
+            return None
+
+        data = buf.tobytes()
+        ts = int(time.time())
+        object_name = f"vehicles/{device_id}/{camera_label}/{track_id}_{ts}.jpg"
+
+        client.put_object(
+            settings.MINIO_BUCKET,
+            object_name,
+            io.BytesIO(data),
+            len(data),
+            content_type="image/jpeg",
+        )
+
+        scheme = "https" if settings.MINIO_SECURE else "http"
+        return f"{scheme}://{settings.MINIO_ENDPOINT}/{settings.MINIO_BUCKET}/{object_name}"
+
+    except Exception:
+        logger.exception("Failed to upload vehicle crop for %s", track_id)
+        return None

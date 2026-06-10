@@ -172,6 +172,30 @@ class MQTTPublisher:
         }
         self._publish(topic, payload)
 
+    def publish_vehicle_events(self, camera_label: str, events: List[Dict]) -> None:
+        """Publish vehicle entry/exit events for multi-capacity zones."""
+        if not events:
+            return
+        topic = f"parking/{settings.DEVICE_ID}/vehicle_events"
+        payload = {
+            "device_id": settings.DEVICE_ID,
+            "camera_id": camera_label,
+            "events": [
+                {
+                    "event_type": e["event_type"],
+                    "slot_label": e["slot_label"],
+                    "vehicle_type": e["vehicle_type"],
+                    "track_id": e["track_id"],
+                    "confidence": round(float(e.get("confidence", 0.0)), 4),
+                    "image_url": e.get("image_url"),
+                    "duration_seconds": e.get("duration_seconds"),
+                }
+                for e in events
+            ],
+            "timestamp": time.time(),
+        }
+        self._publish(topic, payload)
+
     # ------------------------------------------------------------------
     # Config sync (camera + slot CRUD → Central)
     # ------------------------------------------------------------------

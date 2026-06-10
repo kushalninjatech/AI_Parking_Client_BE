@@ -218,5 +218,8 @@ class DetectionLoop:
                     count, debounce_threshold,
                 )
 
+        # Collect vehicle entry/exit events from tracker (multi-capacity zones)
+        vehicle_events = self._detector.last_vehicle_events
+
         if self._on_state_change and results:
-            self._on_state_change(camera_id, results, changes, frame)
+            self._on_state_change(camera_id, results, changes, frame, vehicle_events)
