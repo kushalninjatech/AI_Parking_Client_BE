@@ -138,11 +138,26 @@ def upload_vehicle_crop(
     try:
         x1, y1, x2, y2 = bbox
         h, w = frame.shape[:2]
-        pad = 20
-        x1, y1 = max(0, x1 - pad), max(0, y1 - pad)
-        x2, y2 = min(w, x2 + pad), min(h, y2 + pad)
+
+        # Add 20% padding around bbox for context
+        bw, bh = x2 - x1, y2 - y1
+        pad_x = int(bw * 0.2)
+        pad_y = int(bh * 0.2)
+        x1, y1 = max(0, x1 - pad_x), max(0, y1 - pad_y)
+        x2, y2 = min(w, x2 + pad_x), min(h, y2 + pad_y)
         if x2 <= x1 or y2 <= y1:
             return None
+
+        # Cap crop to max 30% of frame area — prevent full-frame crops for huge bboxes
+        crop_area = (x2 - x1) * (y2 - y1)
+        frame_area = w * h
+        if crop_area > frame_area * 0.3:
+            # Center crop around bbox centroid with max size
+            max_side = int((frame_area * 0.3) ** 0.5)
+            cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+            half = max_side // 2
+            x1, y1 = max(0, cx - half), max(0, cy - half)
+            x2, y2 = min(w, cx + half), min(h, cy + half)
 
         cropped = frame[y1:y2, x1:x2]
         ok, buf = cv2.imencode(".jpg", cropped, [cv2.IMWRITE_JPEG_QUALITY, 80])

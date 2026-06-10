@@ -100,7 +100,10 @@ def on_state_change(camera_id: int, all_results, changes, frame, vehicle_events=
                 )
                 if url:
                     evt["image_url"] = url
-        mqtt_publisher.publish_vehicle_events(camera_label, vehicle_events)
+                else:
+                    logger.warning("Vehicle crop upload failed for %s", evt["track_id"])
+        if vehicle_events:
+            mqtt_publisher.publish_vehicle_events(camera_label, vehicle_events)
 
 
 def on_frame_captured(camera_id: int, frame):
