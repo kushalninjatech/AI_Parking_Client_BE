@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     YOLO_INPUT_SIZE: int = 2048
     YOLO_CONFIDENCE: float = 0.15
     SLOT_OVERLAP_THRESHOLD: float = 0.3  # vehicle bbox must cover 30% of slot polygon to match
+    TRACKER_ENTRY_FRAMES: int = 1  # consecutive frames to confirm vehicle entry
+    TRACKER_EXIT_FRAMES: int = 1  # consecutive frames missed to confirm vehicle exit
     DEPTH_MODEL_PATH: str = "models/onnx/model_quantized.onnx"
     DEPTH_INPUT_SIZE: int = 384
 

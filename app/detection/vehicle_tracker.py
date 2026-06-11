@@ -17,12 +17,7 @@ from app.core.constants import VehicleType
 
 logger = logging.getLogger(__name__)
 
-# Matching threshold as fraction of frame diagonal
 MATCH_DISTANCE_FRACTION = 0.15
-
-# Debounce: consecutive frames to confirm entry/exit
-ENTRY_CONFIRM_FRAMES = 3
-EXIT_CONFIRM_FRAMES = 3
 
 _next_track_id = 0
 
@@ -112,7 +107,7 @@ class VehicleTracker:
             tv.last_seen = now
             tv.miss_count = 0
             tv.seen_count += 1
-            if not tv.confirmed and tv.seen_count >= ENTRY_CONFIRM_FRAMES:
+            if not tv.confirmed and tv.seen_count >= settings.TRACKER_ENTRY_FRAMES:
                 tv.confirmed = True
 
             matched_track_ids.add(track_id)
@@ -138,7 +133,7 @@ class VehicleTracker:
             # If debounce disabled, confirm immediately
             if not settings.DETECTION_DEBOUNCE_ENABLED:
                 tv.confirmed = True
-                tv.seen_count = ENTRY_CONFIRM_FRAMES
+                tv.seen_count = settings.TRACKER_ENTRY_FRAMES
             # Entry confirmed after N consecutive frames (checked above on next update)
             if tv.confirmed:
                 entered.append(tv)
@@ -149,20 +144,20 @@ class VehicleTracker:
             if track_id in matched_track_ids:
                 continue
             tv.miss_count += 1
-            exit_threshold = 1 if not settings.DETECTION_DEBOUNCE_ENABLED else EXIT_CONFIRM_FRAMES
+            exit_threshold = 1 if not settings.DETECTION_DEBOUNCE_ENABLED else settings.TRACKER_EXIT_FRAMES
             if tv.miss_count >= exit_threshold:
                 if tv.confirmed:
                     exited.append(tv)
                 del self._tracked[track_id]
-            elif not tv.confirmed and tv.miss_count >= ENTRY_CONFIRM_FRAMES:
+            elif not tv.confirmed and tv.miss_count >= settings.TRACKER_ENTRY_FRAMES:
                 # Never confirmed, disappeared — discard silently
                 del self._tracked[track_id]
 
         # Also check newly confirmed entries (seen_count just hit threshold)
         for track_id, tv in self._tracked.items():
-            if tv.confirmed and tv.seen_count == ENTRY_CONFIRM_FRAMES and track_id not in matched_track_ids:
+            if tv.confirmed and tv.seen_count == settings.TRACKER_ENTRY_FRAMES and track_id not in matched_track_ids:
                 continue
-            if tv.confirmed and tv.seen_count == ENTRY_CONFIRM_FRAMES:
+            if tv.confirmed and tv.seen_count == settings.TRACKER_ENTRY_FRAMES:
                 entered.append(tv)
 
         # Count confirmed vehicles
