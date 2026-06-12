@@ -223,44 +223,69 @@ class ParkingDetector:
         self, slot: Dict, base: Dict, matched_detections: List[Dict],
         frame_shape: Tuple[int, int],
     ) -> Dict:
-        """Use VehicleTracker for multi-capacity zones."""
+        """Multi-capacity zone detection.
+
+        If TRACKER_ENTRY_FRAMES=1: immediate counts from raw YOLO, no tracker.
+        If TRACKER_ENTRY_FRAMES>1: tracker with debounce for stable entry/exit.
+        """
         slot_id = slot["id"]
+        use_tracker = settings.TRACKER_ENTRY_FRAMES > 1
 
-        # Lazy-init tracker per slot
-        if slot_id not in self._trackers:
-            self._trackers[slot_id] = VehicleTracker(slot_id, slot["label"])
+        # --- Raw YOLO counts (always computed) ---
+        raw_occ_car = sum(1 for d in matched_detections if d["vehicle_type"] == VehicleType.CAR)
+        raw_occ_2w = sum(1 for d in matched_detections if d["vehicle_type"] == VehicleType.TWO_WHEELER)
 
-        tracker = self._trackers[slot_id]
-        tracker_result = tracker.update(matched_detections, frame_shape)
+        if use_tracker:
+            # --- Tracker mode: debounced entry/exit + counts from confirmed tracks ---
+            if slot_id not in self._trackers:
+                self._trackers[slot_id] = VehicleTracker(slot_id, slot["label"])
 
-        # Collect entry/exit events for MQTT publishing
-        for tv in tracker_result["entered"]:
-            self._last_vehicle_events.append({
-                "event_type": "ENTERED",
-                "slot_label": slot["label"],
-                "slot_id": slot_id,
-                "vehicle_type": tv.vehicle_type.value,
-                "track_id": tv.track_id,
-                "confidence": tv.confidence,
-                "centroid": list(tv.centroid),
-                "bbox": tv.bbox,
-            })
-        for tv in tracker_result["exited"]:
-            self._last_vehicle_events.append({
-                "event_type": "EXITED",
-                "slot_label": slot["label"],
-                "slot_id": slot_id,
-                "vehicle_type": tv.vehicle_type.value,
-                "track_id": tv.track_id,
-                "duration_seconds": round(tv.last_seen - tv.first_seen),
-                "centroid": list(tv.centroid),
-                "bbox": tv.bbox,
-            })
+            tracker = self._trackers[slot_id]
+            tracker_result = tracker.update(matched_detections, frame_shape)
 
-        occ_car = tracker_result["occupied_car"]
-        occ_2w = tracker_result["occupied_two_wheeler"]
+            for tv in tracker_result["entered"]:
+                self._last_vehicle_events.append({
+                    "event_type": "ENTERED",
+                    "slot_label": slot["label"],
+                    "slot_id": slot_id,
+                    "vehicle_type": tv.vehicle_type.value,
+                    "track_id": tv.track_id,
+                    "confidence": tv.confidence,
+                    "centroid": list(tv.centroid),
+                    "bbox": tv.bbox,
+                })
+            for tv in tracker_result["exited"]:
+                self._last_vehicle_events.append({
+                    "event_type": "EXITED",
+                    "slot_label": slot["label"],
+                    "slot_id": slot_id,
+                    "vehicle_type": tv.vehicle_type.value,
+                    "track_id": tv.track_id,
+                    "duration_seconds": round(tv.last_seen - tv.first_seen),
+                    "centroid": list(tv.centroid),
+                    "bbox": tv.bbox,
+                })
+
+            occ_car = tracker_result["occupied_car"]
+            occ_2w = tracker_result["occupied_two_wheeler"]
+        else:
+            # --- Immediate mode: raw YOLO counts, every detection = entry event ---
+            occ_car = raw_occ_car
+            occ_2w = raw_occ_2w
+
+            for d in matched_detections:
+                self._last_vehicle_events.append({
+                    "event_type": "ENTERED",
+                    "slot_label": slot["label"],
+                    "slot_id": slot_id,
+                    "vehicle_type": d["vehicle_type"].value,
+                    "track_id": f"raw-{slot_id}-{d['class_id']}-{d['centroid'][0]}",
+                    "confidence": d["confidence"],
+                    "centroid": list(d["centroid"]),
+                    "bbox": d["bbox"],
+                })
+
         total_occ = occ_car + occ_2w
-
         state = SlotState.VEHICLE if total_occ > 0 else SlotState.EMPTY
         best_conf = max((d["confidence"] for d in matched_detections), default=0.0)
         best_type = None
