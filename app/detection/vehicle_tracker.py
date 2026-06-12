@@ -130,6 +130,7 @@ class VehicleTracker:
                 last_seen=now,
             )
             self._tracked[tv.track_id] = tv
+            matched_track_ids.add(tv.track_id)  # protect from exit check below
             # Confirm immediately if entry frames threshold is 1
             if tv.seen_count >= settings.TRACKER_ENTRY_FRAMES:
                 tv.confirmed = True
