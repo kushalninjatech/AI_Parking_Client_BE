@@ -130,11 +130,9 @@ class VehicleTracker:
                 last_seen=now,
             )
             self._tracked[tv.track_id] = tv
-            # If debounce disabled, confirm immediately
-            if not settings.DETECTION_DEBOUNCE_ENABLED:
+            # Confirm immediately if entry frames threshold is 1
+            if tv.seen_count >= settings.TRACKER_ENTRY_FRAMES:
                 tv.confirmed = True
-                tv.seen_count = settings.TRACKER_ENTRY_FRAMES
-            # Entry confirmed after N consecutive frames (checked above on next update)
             if tv.confirmed:
                 entered.append(tv)
 
@@ -144,21 +142,13 @@ class VehicleTracker:
             if track_id in matched_track_ids:
                 continue
             tv.miss_count += 1
-            exit_threshold = 1 if not settings.DETECTION_DEBOUNCE_ENABLED else settings.TRACKER_EXIT_FRAMES
-            if tv.miss_count >= exit_threshold:
+            if tv.miss_count >= settings.TRACKER_EXIT_FRAMES:
                 if tv.confirmed:
                     exited.append(tv)
                 del self._tracked[track_id]
             elif not tv.confirmed and tv.miss_count >= settings.TRACKER_ENTRY_FRAMES:
                 # Never confirmed, disappeared — discard silently
                 del self._tracked[track_id]
-
-        # Also check newly confirmed entries (seen_count just hit threshold)
-        for track_id, tv in self._tracked.items():
-            if tv.confirmed and tv.seen_count == settings.TRACKER_ENTRY_FRAMES and track_id not in matched_track_ids:
-                continue
-            if tv.confirmed and tv.seen_count == settings.TRACKER_ENTRY_FRAMES:
-                entered.append(tv)
 
         # Count confirmed vehicles
         occupied_car = sum(
