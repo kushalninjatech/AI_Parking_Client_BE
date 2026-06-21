@@ -33,11 +33,16 @@ CONFIRM_FRAMES = 2
 
 
 class ParkingDetector:
-    """Detects slot states using YOLO + edge/depth anomaly."""
+    """Detects slot states using YOLO + edge/depth anomaly OR Gemini LLM vision.
 
-    def __init__(self, yolo: YOLODetector, depth: DepthEstimator) -> None:
+    Backend is selected via DETECTION_BACKEND env var ("yolo" or "gemini").
+    """
+
+    def __init__(self, yolo: YOLODetector, depth: DepthEstimator, gemini=None) -> None:
         self._yolo = yolo
         self._depth = depth
+        self._gemini = gemini  # GeminiDetector instance (optional)
+        self._backend = settings.DETECTION_BACKEND.lower()
         self._calibrations: Dict[int, Dict] = {}
         self._last_detections: List[Dict] = []
         self._obstruct_streak: Dict[int, int] = {}
@@ -132,6 +137,82 @@ class ParkingDetector:
 
     def detect_frame(self, frame: np.ndarray, slots: List[Dict], camera_label: str = "") -> List[Dict]:
         """Detect all slot states from a single frame."""
+        # Route to Gemini backend if configured and loaded
+        if self._backend == "gemini" and self._gemini and self._gemini.is_loaded:
+            return self._detect_frame_gemini(frame, slots, camera_label)
+
+        return self._detect_frame_yolo(frame, slots, camera_label)
+
+    def _detect_frame_gemini(self, frame: np.ndarray, slots: List[Dict], camera_label: str = "") -> List[Dict]:
+        """Gemini LLM vision backend — sends cropped ROI per slot."""
+        self._last_detections = []
+        self._last_vehicle_events = []
+
+        results = []
+        for slot in slots:
+            polygon = (
+                json.loads(slot["polygon_coords"])
+                if isinstance(slot["polygon_coords"], str)
+                else slot["polygon_coords"]
+            )
+            slot_type = SlotType(slot.get("slot_type", SlotType.GENERAL.value))
+            base = {"id": slot["id"], "label": slot["label"], "slot_type": slot_type}
+
+            if not polygon:
+                results.append({**base, "state": SlotState.EMPTY, "confidence": 0.0,
+                                "detected_vehicle_type": None, "is_mismatched": False,
+                                "occupied_car": 0, "occupied_two_wheeler": 0})
+                continue
+
+            # Send cropped ROI to Gemini
+            gemini_result = self._gemini.detect_slot(frame, polygon, camera_label)
+
+            # Map Gemini counts to our format
+            occ_car = gemini_result["car"] + gemini_result["bus"] + gemini_result["truck"] + gemini_result["tempo"]
+            occ_2w = gemini_result["two_wheeler"] + gemini_result["auto_rickshaw"]
+            total_vehicles = occ_car + occ_2w
+            is_obstructed = gemini_result["is_obstructed"]
+            confidence = gemini_result["confidence"]
+
+            # Determine state
+            if is_obstructed and total_vehicles == 0:
+                state = SlotState.OBSTRUCTED
+            elif total_vehicles > 0:
+                state = SlotState.VEHICLE
+            elif is_obstructed:
+                # Has vehicles AND obstruction — report as VEHICLE (vehicles take priority)
+                state = SlotState.VEHICLE
+            else:
+                state = SlotState.EMPTY
+
+            # Determine dominant vehicle type
+            if occ_car > 0 and occ_car >= occ_2w:
+                detected_vtype = VehicleType.CAR
+            elif occ_2w > 0:
+                detected_vtype = VehicleType.TWO_WHEELER
+            else:
+                detected_vtype = None
+
+            is_mismatched = (
+                slot_type != SlotType.GENERAL
+                and detected_vtype is not None
+                and detected_vtype.value != slot_type.value
+            )
+
+            results.append({
+                **base,
+                "state": state,
+                "confidence": confidence,
+                "detected_vehicle_type": detected_vtype,
+                "is_mismatched": is_mismatched,
+                "occupied_car": occ_car,
+                "occupied_two_wheeler": occ_2w,
+            })
+
+        return results
+
+    def _detect_frame_yolo(self, frame: np.ndarray, slots: List[Dict], camera_label: str = "") -> List[Dict]:
+        """YOLO + Depth backend — original on-device detection."""
         vehicle_detections = self._yolo.detect(frame, camera_label=camera_label)
         self._last_detections = vehicle_detections
         self._last_vehicle_events = []

@@ -17,6 +17,13 @@ class Settings(BaseSettings):
     MQTT_PASSWORD: str = "Broker@123"
     MQTT_SNAPSHOT_INTERVAL: int = 300  # seconds (5 minutes)
 
+    # Detection backend: "yolo" (YOLO+Depth on-device) or "gemini" (Gemini LLM vision)
+    DETECTION_BACKEND: str = "yolo"
+
+    # Gemini (only used when DETECTION_BACKEND=gemini)
+    GEMINI_API_KEY: str = ""
+    GEMINI_MODEL: str = "gemini-2.5-flash"
+
     # Detection
     DETECTION_INTERVAL: int = 30
     DETECTION_DEBOUNCE_ENABLED: bool = True

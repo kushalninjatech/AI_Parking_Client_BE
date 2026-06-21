@@ -27,10 +27,17 @@ from app.models import mqtt_outbox as _outbox_model  # noqa: F401
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s")
 logger = logging.getLogger("ai_parking_client")
 
-# Global instances
+# Global instances — YOLO/Depth always created (used as fallback even in Gemini mode)
 yolo_detector = YOLODetector()
 depth_estimator = DepthEstimator()
-parking_detector = ParkingDetector(yolo_detector, depth_estimator)
+
+# Gemini detector (only instantiated when backend=gemini)
+gemini_detector = None
+if settings.DETECTION_BACKEND.lower() == "gemini":
+    from app.detection.gemini_detector import GeminiDetector
+    gemini_detector = GeminiDetector()
+
+parking_detector = ParkingDetector(yolo_detector, depth_estimator, gemini=gemini_detector)
 detection_loop = DetectionLoop(parking_detector)
 mqtt_publisher = MQTTPublisher(db_factory=SessionLocal)
 
@@ -201,16 +208,33 @@ async def lifespan(app: FastAPI):
         conn.execute(text("UPDATE parking_slots SET capacity_car = 1 WHERE slot_type = 'GENERAL' AND capacity_car = 0"))
         conn.commit()
 
-    # Load models (graceful — server starts even if models missing)
-    try:
-        yolo_detector.load()
-    except Exception as e:
-        logger.warning("YOLO model not loaded: %s", e)
-
-    try:
-        depth_estimator.load()
-    except Exception as e:
-        logger.warning("Depth model not loaded: %s", e)
+    # Load detection models based on backend
+    if settings.DETECTION_BACKEND.lower() == "gemini":
+        logger.info("Detection backend: GEMINI")
+        if gemini_detector:
+            try:
+                gemini_detector.load()
+            except Exception as e:
+                logger.warning("Gemini detector not loaded: %s — falling back to YOLO", e)
+        # Still load YOLO/Depth as fallback for debug frames and calibration
+        try:
+            yolo_detector.load()
+        except Exception:
+            pass
+        try:
+            depth_estimator.load()
+        except Exception:
+            pass
+    else:
+        logger.info("Detection backend: YOLO")
+        try:
+            yolo_detector.load()
+        except Exception as e:
+            logger.warning("YOLO model not loaded: %s", e)
+        try:
+            depth_estimator.load()
+        except Exception as e:
+            logger.warning("Depth model not loaded: %s", e)
 
     # Connect MQTT (graceful)
     try:
