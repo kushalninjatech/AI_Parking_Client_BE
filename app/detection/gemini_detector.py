@@ -93,6 +93,14 @@ class GeminiDetector:
         if roi is None:
             return self._empty_result()
 
+        frame_h, frame_w = frame.shape[:2]
+        roi_h, roi_w = roi.shape[:2]
+        logger.info(
+            "Gemini ROI crop [%s]: frame=%dx%d → roi=%dx%d (%.0f%% of frame)",
+            camera_label, frame_w, frame_h, roi_w, roi_h,
+            (roi_w * roi_h) / (frame_w * frame_h) * 100,
+        )
+
         # Encode to JPEG bytes
         _, jpeg_bytes = cv2.imencode(".jpg", roi, [cv2.IMWRITE_JPEG_QUALITY, 85])
 
