@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from app.db.session import SessionLocal
 from app.models.camera import Camera
+from app.models.parking_slot import ParkingSlot  # noqa: F401 — needed by Camera relationship
 from app.detection.detection_loop import DetectionLoop
 
 
