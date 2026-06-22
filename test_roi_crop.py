@@ -23,19 +23,14 @@ os.makedirs(OUT_DIR, exist_ok=True)
 
 
 def crop_polygon(frame, polygon):
-    """Crop frame to only the area inside the polygon (black outside)."""
+    """Crop frame to polygon bounding box."""
     pts = np.array(polygon, dtype=np.int32)
-    # Mask: black outside polygon
-    mask = np.zeros(frame.shape[:2], dtype=np.uint8)
-    cv2.fillPoly(mask, [pts], 255)
-    masked = cv2.bitwise_and(frame, frame, mask=mask)
-    # Crop to bounding box
     x1, y1 = pts.min(axis=0)
     x2, y2 = pts.max(axis=0)
     h, w = frame.shape[:2]
     x1, y1 = max(0, x1), max(0, y1)
     x2, y2 = min(w, x2), min(h, y2)
-    return masked[y1:y2, x1:x2]
+    return frame[y1:y2, x1:x2]
 
 
 def main():
