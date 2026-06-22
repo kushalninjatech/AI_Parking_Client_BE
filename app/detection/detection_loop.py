@@ -109,6 +109,9 @@ class DetectionLoop:
             debug_frame = self._detector.generate_debug_frame(
                 frame, self._detector._last_detections, slot_dicts, results
             )
+            # Crop debug frame to union ROI of all slot polygons (Gemini sends cropped ROI)
+            if self._detector._backend == "gemini" and slot_dicts:
+                debug_frame = self._crop_to_slots_roi(debug_frame, slot_dicts)
             url = upload_debug_frame(debug_frame, settings.DEVICE_ID, camera_label)
             if url:
                 logger.info("Debug frame uploaded: %s", url)
@@ -117,6 +120,32 @@ class DetectionLoop:
         except Exception:
             logger.exception("Debug frame upload failed")
         return results
+
+    @staticmethod
+    def _crop_to_slots_roi(frame: np.ndarray, slot_dicts: List[Dict]) -> np.ndarray:
+        """Crop frame to the union bounding box of all slot polygons (with 5% padding)."""
+        import json
+        all_pts = []
+        for slot in slot_dicts:
+            polygon = slot.get("polygon_coords")
+            if not polygon:
+                continue
+            if isinstance(polygon, str):
+                polygon = json.loads(polygon)
+            all_pts.extend(polygon)
+        if not all_pts:
+            return frame
+        pts = np.array(all_pts, dtype=np.int32)
+        x1, y1 = pts.min(axis=0)
+        x2, y2 = pts.max(axis=0)
+        h, w = frame.shape[:2]
+        x1 = max(0, x1)
+        y1 = max(0, y1)
+        x2 = min(w, x2)
+        y2 = min(h, y2)
+        if x2 <= x1 or y2 <= y1:
+            return frame
+        return frame[y1:y2, x1:x2]
 
     # ------------------------------------------------------------------
 
