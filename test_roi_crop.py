@@ -86,7 +86,7 @@ def main():
                 ch, cw = cropped.shape[:2]
 
                 safe = slot.label.replace(" ", "_").replace("/", "_")
-                path = os.path.join(OUT_DIR, f"{safe}.png")
+                path = os.path.join(OUT_DIR, f"{safe}_cr.png")
                 cv2.imwrite(path, cropped)
                 print(f"    cropped: {cw}x{ch} ({cw*ch*100//(w*h)}% of frame) -> {path}")
 
