@@ -25,7 +25,7 @@ from app.models.parking_slot import ParkingSlot  # noqa: F401 — needed by Came
 from app.detection.detection_loop import DetectionLoop
 
 
-OUT_DIR = "/tmp/roi_test"
+OUT_DIR = os.path.join(os.path.dirname(__file__), "debug")
 os.makedirs(OUT_DIR, exist_ok=True)
 
 
