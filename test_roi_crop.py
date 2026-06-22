@@ -68,14 +68,18 @@ def main():
                 if not polygon:
                     continue
 
-                # Draw polygon on crop for reference
+                pts = np.array(polygon, dtype=np.int32)
+                px1, py1 = pts.min(axis=0)
+                px2, py2 = pts.max(axis=0)
+                print(f"  {slot.label}: polygon bbox=({px1},{py1})->({px2},{py2}) frame={w}x{h}")
+
                 cropped = crop_polygon(frame, polygon)
                 ch, cw = cropped.shape[:2]
 
                 safe = slot.label.replace(" ", "_").replace("/", "_")
                 path = os.path.join(OUT_DIR, f"{safe}.jpg")
                 cv2.imwrite(path, cropped)
-                print(f"  {slot.label}: {cw}x{ch} -> {path}")
+                print(f"    cropped: {cw}x{ch} ({cw*ch*100//(w*h)}% of frame) -> {path}")
 
     finally:
         db.close()
