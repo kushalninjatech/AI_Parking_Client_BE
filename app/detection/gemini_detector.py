@@ -17,7 +17,7 @@ from app.core.constants import SlotState, SlotType, VehicleType
 
 logger = logging.getLogger(__name__)
 
-PROMPT = """Analyze this parking area image. Count all parked/stationary vehicles visible.
+PROMPT = """This is a cropped image of a parking zone from a CCTV camera. Count ONLY the vehicles that are parked/stationary WITHIN this cropped area.
 
 Return ONLY valid JSON (no markdown, no code blocks):
 {
@@ -33,16 +33,16 @@ Return ONLY valid JSON (no markdown, no code blocks):
 }
 
 Rules:
-- Count only parked/stationary vehicles, not moving ones.
-- "car" includes sedans, SUVs, hatchbacks, jeeps.
-- "two_wheeler" includes motorcycles, scooters, bicycles.
+- Count ONLY vehicles visible in this cropped image. Do NOT guess or infer vehicles outside the frame.
+- Count only parked/stationary vehicles, ignore moving ones or pedestrians.
+- "car" includes sedans, SUVs, hatchbacks, jeeps. Even partially visible cars at edges count as 1.
+- "two_wheeler" includes motorcycles, scooters, mopeds. Even partially visible ones count as 1.
 - "auto_rickshaw" includes 3-wheeled auto rickshaws.
 - "tempo" includes small commercial goods vehicles, mini trucks.
-- "is_obstructed": true if any non-vehicle object is blocking parking spots.
-- Obstructions: street vendor carts, construction material, debris, barricades, fallen objects, encroachments — anything that is NOT a vehicle but blocks parking space.
-- "obstruction_type": describe what is obstructing (e.g. "street_vendor_cart", "construction_material", "debris") or null if no obstruction.
-- "confidence": your confidence in the analysis (0.0 to 1.0).
-- If the image is too dark or unclear, set confidence below 0.5."""
+- "is_obstructed": true if any non-vehicle object is blocking parking spots in this area.
+- Obstructions: street vendor carts, food stalls, construction material, debris, barricades, fallen objects, encroachments — anything that is NOT a parked vehicle but occupies parking space.
+- "obstruction_type": short description (e.g. "street_vendor_cart", "construction_material") or null if none.
+- "confidence": your confidence in the count accuracy (0.0 to 1.0). Set below 0.5 if image is dark/blurry."""
 
 
 class GeminiDetector:
