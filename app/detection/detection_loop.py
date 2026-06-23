@@ -123,8 +123,11 @@ class DetectionLoop:
 
     @staticmethod
     def _crop_to_slots_roi(frame: np.ndarray, slot_dicts: List[Dict]) -> np.ndarray:
-        """Crop frame to the union bounding box of all slot polygons (with 5% padding)."""
+        """Mask outside all slot polygons to black, then crop to union bbox."""
         import json
+        import cv2
+        h, w = frame.shape[:2]
+        mask = np.zeros((h, w), dtype=np.uint8)
         all_pts = []
         for slot in slot_dicts:
             polygon = slot.get("polygon_coords")
@@ -132,20 +135,20 @@ class DetectionLoop:
                 continue
             if isinstance(polygon, str):
                 polygon = json.loads(polygon)
+            pts = np.array(polygon, dtype=np.int32)
+            cv2.fillPoly(mask, [pts], 255)
             all_pts.extend(polygon)
         if not all_pts:
             return frame
+        masked = cv2.bitwise_and(frame, frame, mask=mask)
         pts = np.array(all_pts, dtype=np.int32)
         x1, y1 = pts.min(axis=0)
         x2, y2 = pts.max(axis=0)
-        h, w = frame.shape[:2]
-        x1 = max(0, x1)
-        y1 = max(0, y1)
-        x2 = min(w, x2)
-        y2 = min(h, y2)
+        x1, y1 = max(0, x1), max(0, y1)
+        x2, y2 = min(w, x2), min(h, y2)
         if x2 <= x1 or y2 <= y1:
             return frame
-        return frame[y1:y2, x1:x2]
+        return masked[y1:y2, x1:x2]
 
     # ------------------------------------------------------------------
 
