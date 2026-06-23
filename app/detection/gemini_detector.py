@@ -131,7 +131,7 @@ class GeminiDetector:
             return self._empty_result()
 
     def _crop_polygon_roi(self, frame: np.ndarray, polygon: List[List[int]]) -> Optional[np.ndarray]:
-        """Crop frame to polygon bounding box (no padding)."""
+        """Crop frame to polygon shape — black outside polygon, then bbox crop."""
         h, w = frame.shape[:2]
         pts = np.array(polygon, dtype=np.int32)
         x1, y1 = pts.min(axis=0)
@@ -142,7 +142,11 @@ class GeminiDetector:
         if x2 <= x1 or y2 <= y1:
             return None
 
-        return frame[y1:y2, x1:x2]
+        # Mask outside polygon to black
+        mask = np.zeros((h, w), dtype=np.uint8)
+        cv2.fillPoly(mask, [pts], 255)
+        masked = cv2.bitwise_and(frame, frame, mask=mask)
+        return masked[y1:y2, x1:x2]
 
     def _parse_response(self, text: str) -> Dict:
         """Parse Gemini JSON response with fallback handling."""
