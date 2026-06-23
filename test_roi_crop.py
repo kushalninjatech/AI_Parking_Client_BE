@@ -23,14 +23,21 @@ os.makedirs(OUT_DIR, exist_ok=True)
 
 
 def crop_polygon(frame, polygon):
-    """Crop frame to polygon bounding box."""
+    """Crop frame to polygon shape, transparent outside."""
     pts = np.array(polygon, dtype=np.int32)
     x1, y1 = pts.min(axis=0)
     x2, y2 = pts.max(axis=0)
     h, w = frame.shape[:2]
     x1, y1 = max(0, x1), max(0, y1)
     x2, y2 = min(w, x2), min(h, y2)
-    return frame[y1:y2, x1:x2]
+    # Create mask and crop
+    mask = np.zeros((h, w), dtype=np.uint8)
+    cv2.fillPoly(mask, [pts], 255)
+    crop = frame[y1:y2, x1:x2]
+    alpha = mask[y1:y2, x1:x2]
+    bgra = cv2.cvtColor(crop, cv2.COLOR_BGR2BGRA)
+    bgra[:, :, 3] = alpha
+    return bgra
 
 
 def main():
@@ -77,7 +84,7 @@ def main():
                 ch, cw = cropped.shape[:2]
 
                 safe = slot.label.replace(" ", "_").replace("/", "_")
-                path = os.path.join(OUT_DIR, f"{safe}_cr.jpg")
+                path = os.path.join(OUT_DIR, f"{safe}_cr.png")
                 cv2.imwrite(path, cropped)
                 print(f"    cropped: {cw}x{ch} ({cw*ch*100//(w*h)}% of frame) -> {path}")
 
