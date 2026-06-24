@@ -19,14 +19,12 @@ logger = logging.getLogger(__name__)
 
 PROMPT = """This is a cropped image of a parking zone from a CCTV camera. Count ONLY the vehicles that are parked/stationary WITHIN this cropped area.
 
+This parking zone only allows CARS and TWO-WHEELERS. Anything else is an obstruction.
+
 Return ONLY valid JSON (no markdown, no code blocks):
 {
   "car": 0,
   "two_wheeler": 0,
-  "auto_rickshaw": 0,
-  "bus": 0,
-  "truck": 0,
-  "tempo": 0,
   "is_obstructed": false,
   "obstruction_type": null,
   "confidence": 0.9
@@ -37,11 +35,8 @@ Rules:
 - Count only parked/stationary vehicles, ignore moving ones or pedestrians.
 - "car" includes sedans, SUVs, hatchbacks, jeeps. Even partially visible cars at edges count as 1.
 - "two_wheeler" includes motorcycles, scooters, mopeds. Even partially visible ones count as 1.
-- "auto_rickshaw" includes 3-wheeled auto rickshaws.
-- "tempo" includes small commercial goods vehicles, mini trucks.
-- "is_obstructed": true if any non-vehicle object is blocking parking spots in this area.
-- Obstructions: street vendor carts, food stalls, construction material, debris, barricades, fallen objects, encroachments — anything that is NOT a parked vehicle but occupies parking space.
-- "obstruction_type": short description (e.g. "street_vendor_cart", "construction_material") or null if none.
+- "is_obstructed": true if ANYTHING other than a car or two-wheeler is occupying parking space. This includes: auto rickshaws, buses, trucks, tempos, mini trucks, street vendor carts, food stalls, construction material, debris, barricades, fallen objects, encroachments, or any other object that is NOT a car or two-wheeler.
+- "obstruction_type": short description (e.g. "auto_rickshaw", "street_vendor_cart", "truck", "construction_material") or null if none.
 - "confidence": your confidence in the count accuracy (0.0 to 1.0). Set below 0.5 if image is dark/blurry."""
 
 
@@ -119,10 +114,9 @@ class GeminiDetector:
 
             result = self._parse_response(response.text)
             logger.info(
-                "Gemini detect [%s]: car=%d 2w=%d auto=%d bus=%d truck=%d tempo=%d obstructed=%s (%.2fs)",
+                "Gemini detect [%s]: car=%d 2w=%d obstructed=%s type=%s (%.2fs)",
                 camera_label, result["car"], result["two_wheeler"],
-                result["auto_rickshaw"], result["bus"], result["truck"], result["tempo"],
-                result["is_obstructed"], elapsed,
+                result["is_obstructed"], result["obstruction_type"], elapsed,
             )
             return result
 
@@ -167,10 +161,6 @@ class GeminiDetector:
         return {
             "car": int(data.get("car", 0)),
             "two_wheeler": int(data.get("two_wheeler", 0)),
-            "auto_rickshaw": int(data.get("auto_rickshaw", 0)),
-            "bus": int(data.get("bus", 0)),
-            "truck": int(data.get("truck", 0)),
-            "tempo": int(data.get("tempo", 0)),
             "is_obstructed": bool(data.get("is_obstructed", False)),
             "obstruction_type": data.get("obstruction_type"),
             "confidence": float(data.get("confidence", 0.5)),
@@ -179,8 +169,7 @@ class GeminiDetector:
     @staticmethod
     def _empty_result() -> Dict:
         return {
-            "car": 0, "two_wheeler": 0, "auto_rickshaw": 0,
-            "bus": 0, "truck": 0, "tempo": 0,
+            "car": 0, "two_wheeler": 0,
             "is_obstructed": False, "obstruction_type": None,
             "confidence": 0.0,
         }
