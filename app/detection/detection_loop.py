@@ -117,28 +117,11 @@ class DetectionLoop:
                 logger.info("Debug frame uploaded: %s", url)
             else:
                 logger.warning("Debug frame upload returned None")
-            # Upload clean frame (polygon borders only, no bboxes) for public view
-            clean = self._generate_clean_frame(frame, slot_dicts)
-            upload_clean_frame(clean, settings.DEVICE_ID, camera_label)
+            # Upload clean frame (raw, no annotations) for public view — FE draws polygons
+            upload_clean_frame(frame, settings.DEVICE_ID, camera_label)
         except Exception:
             logger.exception("Debug frame upload failed")
         return results
-
-    @staticmethod
-    def _generate_clean_frame(frame: np.ndarray, slot_dicts: List[Dict]) -> np.ndarray:
-        """Draw only red polygon borders on the original frame."""
-        import json
-        import cv2
-        clean = frame.copy()
-        for slot in slot_dicts:
-            polygon = slot.get("polygon_coords")
-            if not polygon:
-                continue
-            if isinstance(polygon, str):
-                polygon = json.loads(polygon)
-            pts = np.array(polygon, dtype=np.int32)
-            cv2.polylines(clean, [pts], isClosed=True, color=(0, 0, 255), thickness=2)
-        return clean
 
     @staticmethod
     def _crop_to_slots_roi(frame: np.ndarray, slot_dicts: List[Dict]) -> np.ndarray:
