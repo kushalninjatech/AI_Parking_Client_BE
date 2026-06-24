@@ -168,20 +168,20 @@ class ParkingDetector:
             gemini_result = self._gemini.detect_slot(frame, polygon, camera_label)
 
             # Map Gemini counts to our format
-            occ_car = gemini_result["car"] + gemini_result["bus"] + gemini_result["truck"] + gemini_result["tempo"]
-            occ_2w = gemini_result["two_wheeler"] + gemini_result["auto_rickshaw"]
+            # Only car and two_wheeler are valid vehicles; everything else is obstruction
+            occ_car = gemini_result["car"]
+            occ_2w = gemini_result["two_wheeler"]
             total_vehicles = occ_car + occ_2w
-            is_obstructed = gemini_result["is_obstructed"]
+            other_objects = (gemini_result["auto_rickshaw"] + gemini_result["bus"]
+                            + gemini_result["truck"] + gemini_result["tempo"])
+            is_obstructed = gemini_result["is_obstructed"] or other_objects > 0
             confidence = gemini_result["confidence"]
 
             # Determine state
-            if is_obstructed and total_vehicles == 0:
-                state = SlotState.OBSTRUCTED
-            elif total_vehicles > 0:
+            if total_vehicles > 0:
                 state = SlotState.VEHICLE
             elif is_obstructed:
-                # Has vehicles AND obstruction — report as VEHICLE (vehicles take priority)
-                state = SlotState.VEHICLE
+                state = SlotState.OBSTRUCTED
             else:
                 state = SlotState.EMPTY
 
