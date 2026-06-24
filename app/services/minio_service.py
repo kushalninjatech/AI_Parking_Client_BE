@@ -123,6 +123,41 @@ def upload_debug_frame(
         return None
 
 
+def upload_clean_frame(
+    frame: np.ndarray,
+    device_id: str,
+    camera_label: str,
+) -> Optional[str]:
+    """Upload clean frame (polygon borders only) to MinIO for public view."""
+    client = get_minio_client()
+    if client is None:
+        return None
+
+    try:
+        ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+        if not ok:
+            return None
+
+        data = buf.tobytes()
+        object_name = f"debug/{device_id}/{camera_label}/clean.jpg"
+
+        client.put_object(
+            settings.MINIO_BUCKET,
+            object_name,
+            io.BytesIO(data),
+            len(data),
+            content_type="image/jpeg",
+        )
+
+        scheme = "https" if settings.MINIO_SECURE else "http"
+        url = f"{scheme}://{settings.MINIO_ENDPOINT}/{settings.MINIO_BUCKET}/{object_name}"
+        return url
+
+    except Exception:
+        logger.debug("Failed to upload clean frame")
+        return None
+
+
 def upload_vehicle_crop(
     frame: np.ndarray,
     bbox: list,

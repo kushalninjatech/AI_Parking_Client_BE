@@ -105,7 +105,7 @@ class DetectionLoop:
         results = self._detector.detect_frame(frame, slot_dicts, camera_label=camera_label)
         # Upload annotated debug frame to MinIO
         try:
-            from app.services.minio_service import upload_debug_frame
+            from app.services.minio_service import upload_debug_frame, upload_clean_frame
             debug_frame = self._detector.generate_debug_frame(
                 frame, self._detector._last_detections, slot_dicts, results
             )
@@ -117,9 +117,28 @@ class DetectionLoop:
                 logger.info("Debug frame uploaded: %s", url)
             else:
                 logger.warning("Debug frame upload returned None")
+            # Upload clean frame (polygon borders only, no bboxes) for public view
+            clean = self._generate_clean_frame(frame, slot_dicts)
+            upload_clean_frame(clean, settings.DEVICE_ID, camera_label)
         except Exception:
             logger.exception("Debug frame upload failed")
         return results
+
+    @staticmethod
+    def _generate_clean_frame(frame: np.ndarray, slot_dicts: List[Dict]) -> np.ndarray:
+        """Draw only red polygon borders on the original frame."""
+        import json
+        import cv2
+        clean = frame.copy()
+        for slot in slot_dicts:
+            polygon = slot.get("polygon_coords")
+            if not polygon:
+                continue
+            if isinstance(polygon, str):
+                polygon = json.loads(polygon)
+            pts = np.array(polygon, dtype=np.int32)
+            cv2.polylines(clean, [pts], isClosed=True, color=(0, 0, 255), thickness=2)
+        return clean
 
     @staticmethod
     def _crop_to_slots_roi(frame: np.ndarray, slot_dicts: List[Dict]) -> np.ndarray:
