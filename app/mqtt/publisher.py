@@ -31,6 +31,8 @@ class MQTTPublisher:
         self._client: Optional[mqtt.Client] = None
         self._connected = False
         self._shutdown = False
+        self._reconnecting = False
+        self._reconnect_lock = threading.Lock()
 
     def connect(self) -> bool:
         self._shutdown = False
@@ -305,6 +307,7 @@ class MQTTPublisher:
     def _on_connect(self, client, userdata, flags, reason_code, properties) -> None:
         if reason_code == 0:
             self._connected = True
+            self._reconnecting = False
             logger.info("MQTT connected")
 
             # Publish online status (retained so central sees it immediately)
@@ -340,6 +343,11 @@ class MQTTPublisher:
 
         logger.warning("MQTT disconnected: rc=%d (%s) — will reconnect with backoff", rc, reason_code)
         if not self._shutdown:
+            with self._reconnect_lock:
+                if self._reconnecting:
+                    logger.debug("Reconnect loop already running — skipping")
+                    return
+                self._reconnecting = True
             threading.Thread(target=self._reconnect_loop, daemon=True).start()
 
     def _on_message(self, client, userdata, msg) -> None:
@@ -350,13 +358,32 @@ class MQTTPublisher:
 
     def _reconnect_loop(self) -> None:
         delay = _RECONNECT_MIN_DELAY
-        while not self._shutdown and not self._connected:
-            logger.info("MQTT reconnecting in %ds…", delay)
-            time.sleep(delay)
-            if self._shutdown:
-                break
-            try:
-                self._client.reconnect()
-            except Exception as exc:
-                logger.warning("MQTT reconnect failed: %s", exc)
-            delay = min(delay * 2, _RECONNECT_MAX_DELAY)
+        try:
+            while not self._shutdown and not self._connected:
+                logger.info("MQTT reconnecting in %ds…", delay)
+                time.sleep(delay)
+                if self._shutdown or self._connected:
+                    break
+                try:
+                    # Stop the old loop thread (may have exited/stalled)
+                    self._client.loop_stop()
+                    self._client.reconnect()
+                    # Restart loop thread so CONNACK is processed
+                    self._client.loop_start()
+                    # Wait up to 10s for _on_connect to fire
+                    for _ in range(20):
+                        if self._connected:
+                            break
+                        time.sleep(0.5)
+                    if self._connected:
+                        logger.info("MQTT reconnected successfully")
+                        delay = _RECONNECT_MIN_DELAY
+                    else:
+                        logger.warning("MQTT reconnect: no CONNACK within 10s")
+                        delay = min(delay * 2, _RECONNECT_MAX_DELAY)
+                except Exception as exc:
+                    logger.warning("MQTT reconnect failed: %s", exc)
+                    delay = min(delay * 2, _RECONNECT_MAX_DELAY)
+        finally:
+            with self._reconnect_lock:
+                self._reconnecting = False
