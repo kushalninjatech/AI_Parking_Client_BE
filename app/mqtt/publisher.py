@@ -365,18 +365,50 @@ class MQTTPublisher:
                 if self._shutdown or self._connected:
                     break
                 try:
-                    # Stop the old loop thread (may have exited/stalled)
-                    self._client.loop_stop()
-                    self._client.reconnect()
-                    # Restart loop thread so CONNACK is processed
+                    # Full teardown — kill old client completely
+                    try:
+                        self._client.loop_stop()
+                        self._client.disconnect()
+                    except Exception:
+                        pass
+
+                    # Build a brand-new client (same as connect())
+                    self._client = mqtt.Client(
+                        mqtt.CallbackAPIVersion.VERSION2,
+                        client_id=f"edge-{settings.DEVICE_ID}",
+                        protocol=mqtt.MQTTv5,
+                        reconnect_on_failure=False,
+                    )
+                    self._client.username_pw_set(settings.MQTT_USERNAME, settings.MQTT_PASSWORD)
+
+                    lwt_topic = f"parking/{settings.DEVICE_ID}/status"
+                    self._client.will_set(lwt_topic, json.dumps({
+                        "device_id": settings.DEVICE_ID,
+                        "status": "offline",
+                        "timestamp": time.time(),
+                    }), qos=1, retain=True)
+
+                    self._client.on_connect = self._on_connect
+                    self._client.on_disconnect = self._on_disconnect
+                    self._client.on_message = self._on_message
+
+                    props = Properties(PacketTypes.CONNECT)
+                    props.SessionExpiryInterval = 86400
+
+                    self._client.connect(
+                        settings.MQTT_BROKER_HOST, settings.MQTT_BROKER_PORT,
+                        keepalive=60, clean_start=False, properties=props,
+                    )
                     self._client.loop_start()
+
                     # Wait up to 10s for _on_connect to fire
                     for _ in range(20):
                         if self._connected:
                             break
                         time.sleep(0.5)
+
                     if self._connected:
-                        logger.info("MQTT reconnected successfully")
+                        logger.info("MQTT reconnected successfully (fresh client)")
                         delay = _RECONNECT_MIN_DELAY
                     else:
                         logger.warning("MQTT reconnect: no CONNACK within 10s")
