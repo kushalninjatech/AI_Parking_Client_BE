@@ -100,7 +100,7 @@ def on_state_change(camera_id: int, all_results, changes, frame, vehicle_events=
     from app.core.constants import SlotState as _SS, SlotType as _ST
     db2 = SessionLocal()
     try:
-        all_slots = db2.query(ParkingSlot).filter(ParkingSlot.camera_id == camera_id, ParkingSlot.is_active == True).all()
+        all_slots = db2.query(ParkingSlot).filter(ParkingSlot.camera_id == camera_id).all()
         car_occ, car_total, tw_occ, tw_total, has_obs = 0, 0, 0, 0, False
         for s in all_slots:
             cc = s.capacity_car or (1 if s.slot_type == _ST.CAR.value else 0)
