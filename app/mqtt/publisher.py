@@ -151,6 +151,27 @@ class MQTTPublisher:
         else:
             logger.debug("Snapshot skipped (offline) — next tick will reconcile")
 
+    def publish_parking_scan(self, camera_label: str, scan_data: Dict) -> None:
+        """Publish parking scan summary — called after every detection cycle.
+
+        Central subscribes to this and creates a ParkingScan history row.
+        """
+        topic = f"parking/{settings.DEVICE_ID}/scan"
+        payload = {
+            "device_id": settings.DEVICE_ID,
+            "camera_label": camera_label,
+            "car_occupied": scan_data.get("car_occupied", 0),
+            "car_available": scan_data.get("car_available", 0),
+            "car_total": scan_data.get("car_total", 0),
+            "two_wheeler_occupied": scan_data.get("two_wheeler_occupied", 0),
+            "two_wheeler_available": scan_data.get("two_wheeler_available", 0),
+            "two_wheeler_total": scan_data.get("two_wheeler_total", 0),
+            "has_obstruction": scan_data.get("has_obstruction", False),
+            "image_url": scan_data.get("image_url", ""),
+            "timestamp": time.time(),
+        }
+        self._publish(topic, payload)
+
     def publish_status(self) -> None:
         """Publish online status on /status topic (retained). Also used by LWT for offline."""
         topic = f"parking/{settings.DEVICE_ID}/status"

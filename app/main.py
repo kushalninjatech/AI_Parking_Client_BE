@@ -96,6 +96,37 @@ def on_state_change(camera_id: int, all_results, changes, frame, vehicle_events=
     if changes:
         mqtt_publisher.publish_slot_events(camera_label, changes)
 
+    # Publish parking scan summary (every detection cycle → Central creates history row)
+    from app.core.constants import SlotState as _SS, SlotType as _ST
+    db2 = SessionLocal()
+    try:
+        all_slots = db2.query(ParkingSlot).filter(ParkingSlot.camera_id == camera_id, ParkingSlot.is_active == True).all()
+        car_occ, car_total, tw_occ, tw_total, has_obs = 0, 0, 0, 0, False
+        for s in all_slots:
+            cc = s.capacity_car or (1 if s.slot_type == _ST.CAR.value else 0)
+            tc = s.capacity_two_wheeler or (1 if s.slot_type == _ST.TWO_WHEELER.value else 0)
+            if s.slot_type == _ST.GENERAL.value and cc == 0 and tc == 0:
+                cc = 1
+            car_total += cc
+            tw_total += tc
+            car_occ += s.occupied_car or 0
+            tw_occ += s.occupied_two_wheeler or 0
+            if s.state == _SS.VEHICLE and (s.occupied_car or 0) == 0 and (s.occupied_two_wheeler or 0) == 0:
+                if s.detected_vehicle_type == "TWO_WHEELER":
+                    tw_occ += 1
+                else:
+                    car_occ += 1
+            if s.state == _SS.OBSTRUCTED:
+                has_obs = True
+        img = (changes[0].get("image_url", "") if changes else "")
+        mqtt_publisher.publish_parking_scan(camera_label, {
+            "car_occupied": car_occ, "car_available": max(0, car_total - car_occ), "car_total": car_total,
+            "two_wheeler_occupied": tw_occ, "two_wheeler_available": max(0, tw_total - tw_occ), "two_wheeler_total": tw_total,
+            "has_obstruction": has_obs, "image_url": img,
+        })
+    finally:
+        db2.close()
+
     # Publish vehicle entry/exit events (multi-capacity zones)
     if vehicle_events and frame is not None:
         from app.services.minio_service import upload_vehicle_crop
