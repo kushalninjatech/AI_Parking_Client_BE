@@ -118,7 +118,8 @@ def on_state_change(camera_id: int, all_results, changes, frame, vehicle_events=
                     car_occ += 1
             if s.state == _SS.OBSTRUCTED:
                 has_obs = True
-        img = (changes[0].get("image_url", "") if changes else "")
+        scheme = "https" if settings.MINIO_SECURE else "http"
+        img = f"{scheme}://{settings.MINIO_ENDPOINT}/{settings.MINIO_BUCKET}/debug/{settings.DEVICE_ID}/{camera_label}/latest.jpg"
         mqtt_publisher.publish_parking_scan(camera_label, {
             "car_occupied": car_occ, "car_available": max(0, car_total - car_occ), "car_total": car_total,
             "two_wheeler_occupied": tw_occ, "two_wheeler_available": max(0, tw_total - tw_occ), "two_wheeler_total": tw_total,
