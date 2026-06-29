@@ -153,6 +153,49 @@ def upload_clean_frame(
         url = f"{scheme}://{settings.MINIO_ENDPOINT}/{settings.MINIO_BUCKET}/{object_name}"
         return url
 
+
+def upload_scan_frame(
+    frame: np.ndarray,
+    device_id: str,
+    camera_label: str,
+) -> Optional[str]:
+    """Upload a timestamped scan frame to MinIO for parking history.
+
+    Unlike clean.jpg (overwritten every cycle), each scan gets a unique file
+    so historical images are preserved for PDF export and review.
+    Path: scans/{device_id}/{camera_label}/{timestamp}.jpg
+    """
+    import time
+    client = get_minio_client()
+    if client is None:
+        return None
+
+    try:
+        ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+        if not ok:
+            return None
+
+        data = buf.tobytes()
+        ts = int(time.time())
+        object_name = f"scans/{device_id}/{camera_label}/{ts}.jpg"
+
+        client.put_object(
+            settings.MINIO_BUCKET,
+            object_name,
+            io.BytesIO(data),
+            len(data),
+            content_type="image/jpeg",
+        )
+
+        scheme = "https" if settings.MINIO_SECURE else "http"
+        url = f"{scheme}://{settings.MINIO_ENDPOINT}/{settings.MINIO_BUCKET}/{object_name}"
+        logger.debug("Scan frame uploaded: %s", url)
+        return url
+
+    except Exception:
+        logger.debug("Failed to upload scan frame")
+        return None
+
     except Exception:
         logger.debug("Failed to upload clean frame")
         return None

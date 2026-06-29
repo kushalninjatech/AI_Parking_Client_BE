@@ -118,12 +118,24 @@ def on_state_change(camera_id: int, all_results, changes, frame, vehicle_events=
                     car_occ += 1
             if s.state == _SS.OBSTRUCTED:
                 has_obs = True
-        scheme = "https" if settings.MINIO_SECURE else "http"
-        img = f"{scheme}://{settings.MINIO_ENDPOINT}/{settings.MINIO_BUCKET}/debug/{settings.DEVICE_ID}/{camera_label}/latest.jpg"
+        # Upload a timestamped clean frame for history (each scan gets its own image)
+        scan_img_url = None
+        if frame is not None:
+            from app.services.minio_service import upload_scan_frame
+            from app.detection.detection_loop import DetectionLoop
+            # Generate clean frame (slot polygons only, no YOLO boxes)
+            slot_dicts = [{"label": s.label, "polygon_coords": s.polygon_coords} for s in all_slots]
+            clean = DetectionLoop._generate_clean_frame(frame, slot_dicts)
+            scan_img_url = upload_scan_frame(clean, settings.DEVICE_ID, camera_label)
+
+        if not scan_img_url:
+            scheme = "https" if settings.MINIO_SECURE else "http"
+            scan_img_url = f"{scheme}://{settings.MINIO_ENDPOINT}/{settings.MINIO_BUCKET}/debug/{settings.DEVICE_ID}/{camera_label}/latest.jpg"
+
         mqtt_publisher.publish_parking_scan(camera_label, {
             "car_occupied": car_occ, "car_available": max(0, car_total - car_occ), "car_total": car_total,
             "two_wheeler_occupied": tw_occ, "two_wheeler_available": max(0, tw_total - tw_occ), "two_wheeler_total": tw_total,
-            "has_obstruction": has_obs, "image_url": img,
+            "has_obstruction": has_obs, "image_url": scan_img_url,
         })
     finally:
         db2.close()
