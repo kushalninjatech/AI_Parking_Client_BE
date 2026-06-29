@@ -153,6 +153,10 @@ def upload_clean_frame(
         url = f"{scheme}://{settings.MINIO_ENDPOINT}/{settings.MINIO_BUCKET}/{object_name}"
         return url
 
+    except Exception:
+        logger.debug("Failed to upload clean frame")
+        return None
+
 
 def upload_scan_frame(
     frame: np.ndarray,
