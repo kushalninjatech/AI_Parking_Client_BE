@@ -110,6 +110,7 @@ class MQTTPublisher:
                     "slot_type": s["slot_type"].value if isinstance(s.get("slot_type"), SlotType) else s.get("slot_type"),
                     "detected_vehicle_type": s["detected_vehicle_type"].value if isinstance(s.get("detected_vehicle_type"), VehicleType) else s.get("detected_vehicle_type"),
                     "is_mismatched": s.get("is_mismatched", False),
+                    "has_obstruction": s.get("is_obstructed", False),
                     "image_url": s.get("image_url"),
                     "occupied_car": s.get("occupied_car", 0),
                     "occupied_two_wheeler": s.get("occupied_two_wheeler", 0),
