@@ -118,6 +118,13 @@ def on_state_change(camera_id: int, all_results, changes, frame, vehicle_events=
                     car_occ += 1
             if s.state == _SS.OBSTRUCTED:
                 has_obs = True
+
+        # Also check Gemini's is_obstructed flag from current detection results
+        # (Gemini can flag obstruction even when vehicles are present — state stays VEHICLE)
+        for r in all_results:
+            if r.get("is_obstructed"):
+                has_obs = True
+                break
         # Upload a timestamped clean frame for history (each scan gets its own image)
         scan_img_url = None
         if frame is not None:

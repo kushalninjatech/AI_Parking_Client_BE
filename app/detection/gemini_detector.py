@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 PROMPT = """This is a cropped image of a parking zone from a CCTV camera. Count ONLY the vehicles that are parked/stationary WITHIN this cropped area.
 
-This parking zone only allows CARS and TWO-WHEELERS. Anything else is an obstruction.
+This parking zone only allows CARS and TWO-WHEELERS. Anything else occupying the space is an obstruction.
 
 Return ONLY valid JSON (no markdown, no code blocks):
 {
@@ -32,11 +32,17 @@ Return ONLY valid JSON (no markdown, no code blocks):
 
 Rules:
 - Count ONLY vehicles visible in this cropped image. Do NOT guess or infer vehicles outside the frame.
-- Count only parked/stationary vehicles, ignore moving ones or pedestrians.
 - "car" includes sedans, SUVs, hatchbacks, jeeps. Even partially visible cars at edges count as 1.
 - "two_wheeler" includes motorcycles, scooters, mopeds. Even partially visible ones count as 1.
-- "is_obstructed": true if ANYTHING other than a car or two-wheeler is occupying parking space. This includes: auto rickshaws, buses, trucks, tempos, mini trucks, street vendor carts, food stalls, construction material, debris, barricades, fallen objects, encroachments, or any other object that is NOT a car or two-wheeler.
-- "obstruction_type": short description (e.g. "auto_rickshaw", "street_vendor_cart", "truck", "construction_material") or null if none.
+- Do NOT count auto rickshaws, three-wheelers, tempos, or any commercial vehicle as a car or two_wheeler. These are obstructions.
+- Ignore people who are clearly walking through (in motion). But people standing, sitting, or working in the parking space (e.g. street vendors, hawkers, people with stalls/carts) ARE obstructions because they block parking.
+- "is_obstructed": true if ANYTHING other than a car or two-wheeler is occupying or blocking the parking space. This includes:
+  * Auto rickshaws, three-wheelers (yellow-green vehicles common in India)
+  * Buses, trucks, tempos, mini trucks, commercial vehicles
+  * Street vendors, hawkers, food stalls, vendor carts, people sitting/working in the space
+  * Construction material, debris, barricades, fallen objects, encroachments
+  * Any object or person that prevents a car or two-wheeler from parking there
+- "obstruction_type": short description (e.g. "auto_rickshaw", "street_vendor", "truck", "construction_material", "vendor_cart") or null if none. If multiple obstructions, describe the primary one.
 - "confidence": your confidence in the count accuracy (0.0 to 1.0). Set below 0.5 if image is dark/blurry."""
 
 

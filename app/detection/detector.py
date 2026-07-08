@@ -202,6 +202,8 @@ class ParkingDetector:
                 "confidence": confidence,
                 "detected_vehicle_type": detected_vtype,
                 "is_mismatched": is_mismatched,
+                "is_obstructed": is_obstructed,
+                "obstruction_type": gemini_result.get("obstruction_type"),
                 "occupied_car": occ_car,
                 "occupied_two_wheeler": occ_2w,
             })
